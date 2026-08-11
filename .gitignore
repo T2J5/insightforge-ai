@@ -1,9 +1,0 @@
-node_modules/
-.pnpm-store/
-dist/
-.next/
-coverage/
-.env
-.env.local
-*.tsbuildinfo
-.DS_Store

@@ -6,7 +6,7 @@
 
 **架构：** 使用 pnpm workspace，包含 Next.js Web 应用、Node.js BullMQ Worker，以及分别负责领域契约、持久化、智能体编排、检索、评测与可观测性的共享包。PostgreSQL/pgvector 是权威数据源，Redis 承载异步任务与进度事件，LangGraph.js 运行具备检查点的状态图；模型、搜索和存储供应商均封装在类型化端口之后。
 
-**技术栈：** Node.js 22、TypeScript 5.7+、pnpm 10、Next.js 15、React 19、LangGraph.js、BullMQ、Redis、PostgreSQL 16、pgvector、Drizzle ORM、Zod、AI SDK、OpenTelemetry、Langfuse、Vitest、Testcontainers、Playwright、Docker Compose。
+**技术栈：** Node.js 26.5.0、TypeScript 6.0.3、pnpm 11.17.0、Next.js 15、React 19、LangGraph.js、BullMQ、Redis、PostgreSQL 16、pgvector、Drizzle ORM、Zod、AI SDK、OpenTelemetry、Langfuse、Vitest 4、Testcontainers、Playwright、Docker Compose。
 
 ## 全局约束
 
@@ -88,7 +88,7 @@ insightforge/
 ├── package.json
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
-└── vitest.workspace.ts
+└── vitest.config.ts
 ```
 
 包边界有明确意图：`domain` 负责稳定类型和端口，`db` 负责存储，`retrieval` 负责解析和搜索，`agent` 负责工作流决策，`web` 与 `worker` 负责交付。供应商 SDK 对象不得跨越这些边界。
@@ -101,7 +101,10 @@ insightforge/
 - 新建： `package.json`
 - 新建： `pnpm-workspace.yaml`
 - 新建： `tsconfig.base.json`
-- 新建： `vitest.workspace.ts`
+- 新建： `vitest.config.ts`
+- 新建： `eslint.config.mjs`
+- 新建： `.nvmrc`
+- 新建： `.node-version`
 - 新建： `.env.example`
 - 新建： `.gitignore`
 - 新建： `apps/web/package.json`
@@ -186,7 +189,7 @@ export interface StructuredModel {
 - [ ] **步骤 5：提交**
 
 ```bash
-git add package.json pnpm-workspace.yaml tsconfig.base.json vitest.workspace.ts .env.example .gitignore apps packages
+git add package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json vitest.config.ts eslint.config.mjs .nvmrc .node-version .env.example .gitignore apps packages
 git commit -m "chore: initialize insightforge workspace"
 ```
 
@@ -855,7 +858,7 @@ git commit -m "feat: add public research experience"
 
 - [ ] **步骤 2：添加可复现容器和健康检查**
 
-使用多阶段、非 root 的 Node 22 镜像，并通过 `pnpm install --frozen-lockfile` 锁定安装。Web 健康检查验证进程和数据库；Worker 健康检查分别验证进程、Redis 和数据库，使降级依赖清晰可见。
+使用多阶段、非 root 的 Node 26.5.0 镜像，并通过 `pnpm install --frozen-lockfile` 锁定安装。Web 健康检查验证进程和数据库；Worker 健康检查分别验证进程、Redis 和数据库，使降级依赖清晰可见。
 
 - [ ] **步骤 3：配置托管环境**
 

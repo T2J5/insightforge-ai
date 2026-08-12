@@ -1,0 +1,12 @@
+{
+  "name": "@insightforge/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --eval \"console.log('web app is not scaffolded yet')\"",
+    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "lint": "eslint . --no-error-on-unmatched-pattern",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+  }
+}

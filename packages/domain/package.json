@@ -7,11 +7,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "vitest run --root ../.. --project @insightforge/domain",
     "build": "tsc --noEmit -p ../../tsconfig.base.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
   },
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
   }
 }

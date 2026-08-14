@@ -1,0 +1,29 @@
+{
+  "name": "@insightforge/db",
+  "version": "0.1.0",
+  "description": "",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "lint": "eslint src drizzle.config.ts",
+    "test": "vitest run --root ../.. --project @insightforge/db",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:check": "drizzle-kit check"
+  },
+  "type": "module",
+  "dependencies": {
+    "@insightforge/domain": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "dotenv": "17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "vitest": "^4.1.10"
+  }
+}

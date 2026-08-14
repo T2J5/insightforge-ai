@@ -1,0 +1,10 @@
+node_modules
+.pnpm
+.dist
+build
+dist
+coverage
+.vite
+.next
+**/*.snap
+pnpm-lock.yaml

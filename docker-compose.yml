@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16 # 提供PostgreSQL 16和pgvector扩展。
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: insightforge
+      POSTGRES_PASSWORD: insightforge
+      POSTGRES_DB: insightforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - insightforge-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U insightforge -d insightforge
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+volumes:
+  insightforge-postgres-data:

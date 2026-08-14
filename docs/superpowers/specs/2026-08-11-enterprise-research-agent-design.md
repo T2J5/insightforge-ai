@@ -118,7 +118,8 @@ flowchart TD
 type ResearchState = {
   runId: string;
   company: string;
-  focus: "comprehensive" | "product" | "technology" | "business" | "competition";
+  focus:
+    "comprehensive" | "product" | "technology" | "business" | "competition";
   depth: "quick" | "deep";
   plan: ResearchQuestion[];
   completedQuestionIds: string[];
@@ -256,15 +257,15 @@ CI 默认使用固定模型响应或录制结果，避免每次提交产生外�
 
 ## 13. 八周交付计划
 
-| 周次 | 交付结果 |
-| --- | --- |
-| 第 1 周 | 单仓库骨架、数据库、鉴权、任务创建和部署流水线 |
-| 第 2 周 | Agent 状态图、异步 Worker、SSE 进度、取消和恢复 |
-| 第 3 周 | 网页搜索、抓取、证据提取和来源管理 |
-| 第 4 周 | 文件上传、解析、pgvector、混合检索和重排序 |
-| 第 5 周 | 报告生成、引用、Reviewer、一次自动修订和 MCP 接口 |
-| 第 6 周 | Golden Dataset、RAG/Agent 评测和 Langfuse 观测 |
-| 第 7 周 | 限流、缓存、成本治理、安全和故障恢复 |
+| 周次    | 交付结果                                              |
+| ------- | ----------------------------------------------------- |
+| 第 1 周 | 单仓库骨架、数据库、鉴权、任务创建和部署流水线        |
+| 第 2 周 | Agent 状态图、异步 Worker、SSE 进度、取消和恢复       |
+| 第 3 周 | 网页搜索、抓取、证据提取和来源管理                    |
+| 第 4 周 | 文件上传、解析、pgvector、混合检索和重排序            |
+| 第 5 周 | 报告生成、引用、Reviewer、一次自动修订和 MCP 接口     |
+| 第 6 周 | Golden Dataset、RAG/Agent 评测和 Langfuse 观测        |
+| 第 7 周 | 限流、缓存、成本治理、安全和故障恢复                  |
 | 第 8 周 | UI 打磨、公开部署、示例报告、README、架构图和演示视频 |
 
 每周成果都必须能够独立运行和验收。后续周次可以增强已有能力，但不能以尚未实现的未来模块作为当前成果能够工作的前提。

@@ -20,8 +20,5 @@ export type ModelResult<T> = {
 };
 
 export interface StructuredModel {
-  generate<T>(
-    schema: ZodType<T>,
-    input: ModelInput,
-  ): Promise<ModelResult<T>>;
+  generate<T>(schema: ZodType<T>, input: ModelInput): Promise<ModelResult<T>>;
 }

@@ -24,6 +24,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      DATABASE_URL: postgresql://insightforge:insightforge@localhost:5432/insightforge_test
+      DATABASE_TEST_URL: postgresql://insightforge:insightforge@localhost:5432/insightforge_test
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: insightforge
+          POSTGRES_PASSWORD: insightforge
+          POSTGRES_DB: insightforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U insightforge -d insightforge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,11 +65,20 @@ jobs:
       - name: Check peer dependencies
         run: pnpm peers check
 
+      - name: Check formatting
+        run: pnpm format:check
+
       - name: Lint
         run: pnpm lint
 
       - name: Type check
         run: pnpm typecheck
+
+      - name: Check database migrations
+        run: pnpm --filter @insightforge/db db:check
+
+      - name: Apply test database migrations
+        run: pnpm --filter @insightforge/db db:migrate
 
       - name: Run tests
         run: pnpm test

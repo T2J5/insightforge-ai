@@ -17,16 +17,28 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "prepare": "husky"
   },
   "type": "module",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
     "eslint": "^10.8.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "prettier": "^3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.66.0",
     "vitest": "^4.1.10"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx,mjs,cjs,jsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,yaml,yml,css,scss}": [
+      "prettier --write"
+    ]
   }
 }

@@ -1,9 +1,12 @@
 import {
+  CompleteResearchRunInputSchema,
   CreateResearchRunSchema,
   ResearchRunSchema,
   RunCheckpointInputSchema,
+  RunCheckpointKeySchema,
   RunCheckpointSchema,
   RunStatusSchema,
+  type CompleteResearchRunInput,
   type CreateResearchRun,
   type ResearchRun,
   type RunCheckpoint,
@@ -11,7 +14,7 @@ import {
   type RunStatus,
 } from "@insightforge/domain";
 import type { Database } from "../client";
-import { runCheckpoints } from "../schema";
+import { runCheckpoints, users } from "../schema";
 import { researchRuns } from "../schema";
 import { and, eq } from "drizzle-orm";
 
@@ -41,6 +44,23 @@ const toRunCheckpoint = (
   row: typeof runCheckpoints.$inferSelect,
 ): RunCheckpoint => RunCheckpointSchema.parse(row);
 
+/**
+ * 校验并标准化查询使用的 checkpointKey。
+ *
+ * 空字符串使用稳定错误码；
+ * 其他格式错误，例如超过128字符，使用 INVALID。
+ */
+const parseCheckpointKey = (checkpointKey: string): string => {
+  if (typeof checkpointKey !== "string" || checkpointKey.trim().length === 0) {
+    throw new Error("RUN_CHECKPOINT_KEY_REQUIRED");
+  }
+  const result = RunCheckpointKeySchema.safeParse(checkpointKey);
+  if (!result.success) {
+    throw new Error("RUN_CHECKPOINT_KEY_INVALID");
+  }
+  return result.data;
+};
+
 export class RunRepository {
   constructor(private readonly db: Database) {}
 
@@ -51,16 +71,25 @@ export class RunRepository {
    */
   async create(input: CreateResearchRun): Promise<ResearchRun> {
     const parsed = CreateResearchRunSchema.parse(input);
-    const [row] = await this.db
-      .insert(researchRuns)
-      .values(parsed)
-      // PostgreSQL 支持插入或更新后立即返回结果,减少一次数据库往返，也避免查询期间数据发生变化。
-      .returning();
+    return this.db.transaction(async (transaction) => {
+      await transaction
+        .insert(users)
+        .values({
+          id: parsed.ownerId,
+          email: null,
+        })
+        .onConflictDoNothing({ target: users.id });
+      const [row] = await transaction
+        .insert(researchRuns)
+        .values(parsed)
+        // PostgreSQL 支持插入或更新后立即返回结果,减少一次数据库往返，也避免查询期间数据发生变化。
+        .returning();
 
-    if (!row) {
-      throw new Error("RUN_CREATE_FAILED");
-    }
-    return toResearchRun(row);
+      if (!row) {
+        throw new Error("RUN_CREATE_FAILED");
+      }
+      return toResearchRun(row);
+    });
   }
 
   /**
@@ -121,6 +150,39 @@ export class RunRepository {
   }
 
   /**
+   * 完成一次正在运行的调研任务，并原子保存用量信息。
+   *
+   * 状态和用量在同一条 UPDATE 中写入，避免任务已经 completed，
+   * 但 tokenUsage 或 estimatedCostCny 仍保留默认值。
+   */
+  async complete(
+    runId: string,
+    input: CompleteResearchRunInput,
+  ): Promise<ResearchRun> {
+    const parsed = CompleteResearchRunInputSchema.parse(input);
+
+    const [row] = await this.db
+      .update(researchRuns)
+      .set({
+        status: "completed",
+        tokenUsage: parsed.tokenUsage,
+        // PostgreSQL numeric 在 Drizzle 中使用字符串写入。
+        estimatedCostCny: parsed.estimatedCostCny.toString(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(researchRuns.id, runId), eq(researchRuns.status, "running")),
+      )
+      .returning();
+
+    if (!row) {
+      throw new Error("RUN_STATUS_CONFLICT");
+    }
+
+    return toResearchRun(row);
+  }
+
+  /**
    * 保存或更新工作流检查点。
    * 进行幂等保存
    * 相同 runId + checkpointKey 只会保留一条记录。
@@ -163,5 +225,31 @@ export class RunRepository {
       }
       return toRunCheckpoint(row);
     });
+  }
+
+  /**
+   * 读取某个 Run 的指定检查点。
+   *
+   * 使用 runId 和 checkpointKey 联合查询，
+   * 防止不同 Run 或不同工作流阶段的数据串联。
+   *
+   * 没有找到时返回 null。
+   */
+  async getCheckpoint(
+    runId: string,
+    checkpointKey: string,
+  ): Promise<RunCheckpoint | null> {
+    const parsedCheckpointKey = parseCheckpointKey(checkpointKey);
+    const [row] = await this.db
+      .select()
+      .from(runCheckpoints)
+      .where(
+        and(
+          eq(runCheckpoints.runId, runId),
+          eq(runCheckpoints.checkpointKey, parsedCheckpointKey),
+        ),
+      )
+      .limit(1);
+    return row ? toRunCheckpoint(row) : null;
   }
 }

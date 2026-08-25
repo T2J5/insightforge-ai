@@ -71,6 +71,30 @@ export const CreateResearchRunSchema = z.object({
 export type CreateResearchRun = z.infer<typeof CreateResearchRunSchema>;
 
 /**
+ * Agent 成功完成调研任务时，需要保存的用量信息。
+ *
+ * 任务状态不允许由调用方传入，
+ * Repository 会固定把 running 更新为 completed。
+ */
+export const CompleteResearchRunInputSchema = z
+  .object({
+    /**
+     * 本次 Agent 工作流消耗的总 Token 数量。
+     */
+    tokenUsage: z.int().nonnegative(),
+
+    /**
+     * 本次 Agent 工作流预估产生的人民币成本。
+     */
+    estimatedCostCny: z.number().nonnegative(),
+  })
+  .strict();
+
+export type CompleteResearchRunInput = z.infer<
+  typeof CompleteResearchRunInputSchema
+>;
+
+/**
  * 已持久化的完整调研任务。
  *
  * 该结构主要用于Repository返回值和内部服务之间传递。
@@ -126,12 +150,24 @@ export const JsonObjectSchema: z.ZodType<JsonObject> = z.record(
 );
 
 /**
+ * 工作流检查点名称。
+ *
+ * 同一个 Run 中通过 checkpointKey 区分：
+ * - request；
+ * - planner；
+ * - search；
+ * - writer 等不同阶段。
+ */
+export const RunCheckpointKeySchema = z.string().trim().min(1).max(128);
+export type RunCheckpointKey = z.infer<typeof RunCheckpointKeySchema>;
+
+/**
  * 保存检查点时调用方提供的内容。
  *
  * runId作为Repository方法参数传入，不在这个输入中重复出现。
  */
 export const RunCheckpointInputSchema = z.object({
-  checkpointKey: z.string().trim().min(1).max(128),
+  checkpointKey: RunCheckpointKeySchema,
 
   state: JsonObjectSchema,
 });
@@ -146,7 +182,7 @@ export const RunCheckpointSchema = z.object({
 
   runId: z.uuid(),
 
-  checkpointKey: z.string().trim().min(1).max(128),
+  checkpointKey: RunCheckpointKeySchema,
 
   state: JsonObjectSchema,
 

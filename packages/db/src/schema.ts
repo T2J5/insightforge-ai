@@ -67,7 +67,7 @@ export const users = pgTable(
   "users",
   {
     id: varchar("id", { length: 128 }).primaryKey(),
-    email: varchar("email", { length: 320 }).notNull(),
+    email: varchar("email", { length: 320 }),
     name: varchar("name", { length: 120 }),
     createdAt: timestamp("created_at", {
       withTimezone: true,

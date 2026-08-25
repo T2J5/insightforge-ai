@@ -4,9 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --eval \"console.log('web app is not scaffolded yet')\"",
-    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run --root ../.. --project @insightforge/web",
+    "test:watch": "vitest --root ../.. --project @insightforge/web",
     "lint": "eslint . --no-error-on-unmatched-pattern",
-    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@insightforge/db": "workspace:*",
+    "@insightforge/domain": "workspace:*",
+    "bullmq": "5.81.2",
+    "ioredis": "5.11.1",
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "vitest": "4.1.10"
   }
 }

@@ -18,5 +18,27 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      - --appendonly # 启用AOF持久化,容器重启后尽量保留队列数据
+      - "yes"
+      - --maxmemory-policy
+      - noeviction # Redis 内存不足时返回错误，而不是自动删除 BullMQ 的队列键
+    volumes:
+      - insightforge-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
 volumes:
   insightforge-postgres-data:
+  insightforge-redis-data:

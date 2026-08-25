@@ -6,6 +6,6 @@ allowBuilds:
   msgpackr-extract: false
   sharp: false
 minimumReleaseAgeExclude:
-  - '@ai-sdk/gateway@4.0.59'
-  - '@ai-sdk/openai@4.0.45'
+  - "@ai-sdk/gateway@4.0.59"
+  - "@ai-sdk/openai@4.0.45"
   - ai@7.0.73

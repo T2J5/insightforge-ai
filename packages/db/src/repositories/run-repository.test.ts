@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -91,6 +92,35 @@ describe.sequential("RunRepository", () => {
     expect(run.id).toEqual(expect.any(String));
   });
 
+  it("首次匿名用户创建Run时在同一事务中自动创建用户", async () => {
+    const anonymousOwnerId = `anonymous:${randomUUID()}`;
+
+    try {
+      const run = await repository.create({
+        ownerId: anonymousOwnerId,
+        company: "OpenAI",
+        focus: "technology",
+        depth: "quick",
+      });
+
+      const [storedUser] = await connection.db
+        .select()
+        .from(users)
+        .where(eq(users.id, anonymousOwnerId))
+        .limit(1);
+
+      expect(storedUser).toMatchObject({
+        id: anonymousOwnerId,
+        email: null,
+        name: null,
+      });
+      expect(run.ownerId).toBe(anonymousOwnerId);
+      expect(await repository.get(run.id)).toEqual(run);
+    } finally {
+      await connection.db.delete(users).where(eq(users.id, anonymousOwnerId));
+    }
+  });
+
   it("gets an existing research run", async () => {
     const created = await createTestRun();
 
@@ -119,6 +149,44 @@ describe.sequential("RunRepository", () => {
     const stored = await repository.get(run.id);
 
     expect(stored?.status).toBe("running");
+  });
+
+  it("原子完成 running 任务并持久化用量", async () => {
+    const run = await createTestRun();
+    await repository.transition(run.id, "queued", "running");
+
+    const completed = await repository.complete(run.id, {
+      tokenUsage: 59068,
+      estimatedCostCny: 0.123456,
+    });
+
+    expect(completed).toMatchObject({
+      status: "completed",
+      tokenUsage: 59068,
+      estimatedCostCny: 0.123456,
+    });
+    expect(await repository.get(run.id)).toMatchObject({
+      status: "completed",
+      tokenUsage: 59068,
+      estimatedCostCny: 0.123456,
+    });
+  });
+
+  it("拒绝完成非 running 状态的任务且不写入用量", async () => {
+    const run = await createTestRun();
+
+    await expect(
+      repository.complete(run.id, {
+        tokenUsage: 100,
+        estimatedCostCny: 0.1,
+      }),
+    ).rejects.toThrow("RUN_STATUS_CONFLICT");
+
+    expect(await repository.get(run.id)).toMatchObject({
+      status: "queued",
+      tokenUsage: 0,
+      estimatedCostCny: 0,
+    });
   });
 
   it("upserts a checkpoint by run and checkpoint key", async () => {
@@ -162,5 +230,69 @@ describe.sequential("RunRepository", () => {
       searchCount: 2,
       completed: true,
     });
+  });
+
+  it("gets a checkpoint and normalizes its key", async () => {
+    const run = await createTestRun();
+    const saved = await repository.saveCheckpoint(run.id, {
+      checkpointKey: "request",
+      state: {
+        documentIds: [],
+        source: "api",
+      },
+    });
+
+    const found = await repository.getCheckpoint(run.id, " request ");
+
+    expect(found).toEqual(saved);
+  });
+
+  it("returns null when a checkpoint does not exist", async () => {
+    const run = await createTestRun();
+
+    const found = await repository.getCheckpoint(run.id, "request");
+
+    expect(found).toBeNull();
+  });
+
+  it("isolates checkpoints by both run and checkpoint key", async () => {
+    const firstRun = await createTestRun();
+    const secondRun = await createTestRun();
+
+    await repository.saveCheckpoint(firstRun.id, {
+      checkpointKey: "request",
+      state: { marker: "first-request" },
+    });
+    await repository.saveCheckpoint(firstRun.id, {
+      checkpointKey: "planner",
+      state: { marker: "first-planner" },
+    });
+    await repository.saveCheckpoint(secondRun.id, {
+      checkpointKey: "request",
+      state: { marker: "second-request" },
+    });
+
+    const firstRequest = await repository.getCheckpoint(firstRun.id, "request");
+    const firstPlanner = await repository.getCheckpoint(firstRun.id, "planner");
+    const secondRequest = await repository.getCheckpoint(
+      secondRun.id,
+      "request",
+    );
+
+    expect(firstRequest?.state).toEqual({ marker: "first-request" });
+    expect(firstPlanner?.state).toEqual({ marker: "first-planner" });
+    expect(secondRequest?.state).toEqual({ marker: "second-request" });
+  });
+
+  it.each([
+    ["空字符串", "", "RUN_CHECKPOINT_KEY_REQUIRED"],
+    ["空白字符串", "   ", "RUN_CHECKPOINT_KEY_REQUIRED"],
+    ["超过128字符", "a".repeat(129), "RUN_CHECKPOINT_KEY_INVALID"],
+  ])("rejects %s checkpoint key", async (_case, checkpointKey, errorCode) => {
+    const run = await createTestRun();
+
+    await expect(
+      repository.getCheckpoint(run.id, checkpointKey),
+    ).rejects.toThrow(errorCode);
   });
 });

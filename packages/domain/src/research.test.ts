@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CompleteResearchRunInputSchema,
   CreateResearchRunSchema,
   ResearchRunSchema,
   RunCheckpointInputSchema,
+  RunCheckpointKeySchema,
 } from "./research";
 
 const runId = "550e8400-e29b-41d4-a716-446655440000";
@@ -75,6 +77,29 @@ describe("ResearchRunSchema", () => {
   });
 });
 
+describe("CompleteResearchRunInputSchema", () => {
+  it("接受非负的 Token 用量和预估成本", () => {
+    expect(
+      CompleteResearchRunInputSchema.parse({
+        tokenUsage: 59068,
+        estimatedCostCny: 0.12,
+      }),
+    ).toEqual({
+      tokenUsage: 59068,
+      estimatedCostCny: 0.12,
+    });
+  });
+
+  it.each([
+    { tokenUsage: -1, estimatedCostCny: 0 },
+    { tokenUsage: 1.5, estimatedCostCny: 0 },
+    { tokenUsage: 1, estimatedCostCny: -0.01 },
+    { tokenUsage: 1, estimatedCostCny: 0, status: "completed" },
+  ])("拒绝非法完成输入：%j", (input) => {
+    expect(CompleteResearchRunInputSchema.safeParse(input).success).toBe(false);
+  });
+});
+
 describe("RunCheckpointInputSchema", () => {
   it("接受可序列化的嵌套JSON状态", () => {
     const result = RunCheckpointInputSchema.parse({
@@ -102,4 +127,19 @@ describe("RunCheckpointInputSchema", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+describe("RunCheckpointKeySchema", () => {
+  it("清理检查点名称首尾空格", () => {
+    expect(RunCheckpointKeySchema.parse(" request ")).toBe("request");
+  });
+
+  it.each(["", "   ", "a".repeat(129)])(
+    "拒绝非法检查点名称：%j",
+    (checkpointKey) => {
+      expect(RunCheckpointKeySchema.safeParse(checkpointKey).success).toBe(
+        false,
+      );
+    },
+  );
 });

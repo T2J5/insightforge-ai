@@ -4,9 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --eval \"console.log('worker app is not scaffolded yet')\"",
-    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run --root ../.. --project @insightforge/worker",
+    "test:watch": "vitest --root ../.. --project @insightforge/worker",
     "lint": "eslint . --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+  },
+  "dependencies": {
+    "@insightforge/db": "workspace:*",
+    "@insightforge/domain": "workspace:*",
+    "@insightforge/agent": "workspace:*",
+    "bullmq": "5.81.2",
+    "ioredis": "5.11.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12",
+    "vitest": "4.1.10"
   }
 }

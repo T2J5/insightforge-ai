@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => {
+  const model = { kind: "model" };
+  const webSearch = { kind: "web-search" };
+  const contentExtractor = { kind: "content-extractor" };
+  const researchTool = { kind: "research-tool" };
+  const graph = { kind: "graph" };
+  const database = { db: { kind: "database" } };
+  const redis = { kind: "redis" };
+  const runs = { kind: "runs" };
+  const progress = { kind: "progress" };
+  const cancellation = { kind: "cancellation" };
+  const workflow = { kind: "workflow" };
+
+  return {
+    model,
+    webSearch,
+    contentExtractor,
+    researchTool,
+    graph,
+    database,
+    redis,
+    runs,
+    progress,
+    cancellation,
+    workflow,
+    createOpenAiStructuredModel: vi.fn(() => model),
+    createTavilyWebSearch: vi.fn(() => webSearch),
+    createTavilyContentExtractor: vi.fn(() => contentExtractor),
+    WebResearchTool: vi.fn(function MockWebResearchTool() {
+      return researchTool;
+    }),
+    createResearchGraph: vi.fn(() => graph),
+    getWorkerDatabaseConnection: vi.fn(() => database),
+    getWorkerRedis: vi.fn(() => redis),
+    RunRepository: vi.fn(function MockRunRepository() {
+      return runs;
+    }),
+    ProgressPublisher: vi.fn(function MockProgressPublisher() {
+      return progress;
+    }),
+    CancellationGuard: vi.fn(function MockCancellationGuard() {
+      return cancellation;
+    }),
+    AgentResearchWorkflow: vi.fn(function MockAgentResearchWorkflow() {
+      return workflow;
+    }),
+  };
+});
+
+vi.mock("@insightforge/agent", () => ({
+  createOpenAiStructuredModel: mocks.createOpenAiStructuredModel,
+  createTavilyWebSearch: mocks.createTavilyWebSearch,
+  createTavilyContentExtractor: mocks.createTavilyContentExtractor,
+  WebResearchTool: mocks.WebResearchTool,
+  createResearchGraph: mocks.createResearchGraph,
+}));
+
+vi.mock("@insightforge/db", () => ({
+  RunRepository: mocks.RunRepository,
+}));
+
+vi.mock("./database", () => ({
+  getWorkerDatabaseConnection: mocks.getWorkerDatabaseConnection,
+}));
+
+vi.mock("./redis", () => ({
+  getWorkerRedis: mocks.getWorkerRedis,
+}));
+
+vi.mock("./progress-publisher", () => ({
+  ProgressPublisher: mocks.ProgressPublisher,
+}));
+
+vi.mock("./cancellation", () => ({
+  CancellationGuard: mocks.CancellationGuard,
+}));
+
+vi.mock("./agent-workflow", () => ({
+  AgentResearchWorkflow: mocks.AgentResearchWorkflow,
+}));
+
+import { createAgentResearchWorkflow } from "./agent-workflow-provider";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("MODEL_API_KEY", "model-key");
+  vi.stubEnv("SEARCH_API_KEY", "search-key");
+  vi.stubEnv("MODEL_NAME", "test-model");
+  vi.stubEnv("MODEL_BASE_URL", "https://model.example.com/v1");
+  vi.stubEnv("MODEL_MAX_RETRIES", "2");
+  vi.stubEnv("MODEL_TIMEOUT_MS", "120000");
+  vi.stubEnv("MODEL_MAX_OUTPUT_TOKENS", "8000");
+  vi.stubEnv("MODEL_INPUT_COST_CNY_PER_1M_TOKENS", "1.5");
+  vi.stubEnv("MODEL_OUTPUT_COST_CNY_PER_1M_TOKENS", "6");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("createAgentResearchWorkflow", () => {
+  it.each([
+    ["MODEL_API_KEY", "Environment variable MODEL_API_KEY is required"],
+    ["SEARCH_API_KEY", "Environment variable SEARCH_API_KEY is required"],
+  ])("缺少 %s 时在创建基础设施前失败", (name, message) => {
+    vi.stubEnv(name, "");
+
+    expect(() => createAgentResearchWorkflow()).toThrow(message);
+    expect(mocks.getWorkerDatabaseConnection).not.toHaveBeenCalled();
+    expect(mocks.getWorkerRedis).not.toHaveBeenCalled();
+  });
+
+  it("使用环境变量创建模型、搜索工具、Graph 和 Workflow", () => {
+    expect(createAgentResearchWorkflow()).toBe(mocks.workflow);
+
+    expect(mocks.createOpenAiStructuredModel).toHaveBeenCalledWith({
+      apiKey: "model-key",
+      modelName: "test-model",
+      baseUrl: "https://model.example.com/v1",
+      maxRetries: 2,
+      timeoutMs: 120_000,
+      maxOutputTokens: 8_000,
+      inputCostCnyPerMillionTokens: 1.5,
+      outputCostCnyPerMillionTokens: 6,
+    });
+    expect(mocks.WebResearchTool).toHaveBeenCalledWith(
+      mocks.webSearch,
+      mocks.contentExtractor,
+    );
+    expect(mocks.createResearchGraph).toHaveBeenCalledWith({
+      model: mocks.model,
+      researchTool: mocks.researchTool,
+    });
+    expect(mocks.AgentResearchWorkflow).toHaveBeenCalledWith(
+      mocks.runs,
+      mocks.graph,
+      mocks.progress,
+      mocks.cancellation,
+    );
+  });
+
+  it("MODEL_MAX_RETRIES 允许为 0", () => {
+    vi.stubEnv("MODEL_MAX_RETRIES", "0");
+
+    expect(() => createAgentResearchWorkflow()).not.toThrow();
+    expect(mocks.createOpenAiStructuredModel).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRetries: 0 }),
+    );
+  });
+
+  it.each([
+    ["MODEL_MAX_RETRIES", "6"],
+    ["MODEL_MAX_RETRIES", "1.5"],
+    ["MODEL_TIMEOUT_MS", "0"],
+    ["MODEL_MAX_OUTPUT_TOKENS", "0"],
+    ["MODEL_INPUT_COST_CNY_PER_1M_TOKENS", "-1"],
+  ])("拒绝非法环境变量 %s=%s", (name, value) => {
+    vi.stubEnv(name, value);
+
+    expect(() => createAgentResearchWorkflow()).toThrow();
+    expect(mocks.getWorkerDatabaseConnection).not.toHaveBeenCalled();
+  });
+});

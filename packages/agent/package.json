@@ -1,0 +1,32 @@
+{
+  "name": "@insightforge/agent",
+  "version": "0.1.0",
+  "description": "",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "demo": "tsx examples/stream-research-graph.ts",
+    "demo:real": "tsx examples/real-model-research-graph.ts",
+    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "lint": "eslint src",
+    "test": "vitest run --root ../.. --project @insightforge/agent",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.45",
+    "@insightforge/domain": "workspace:*",
+    "@langchain/core": "1.2.8",
+    "@langchain/langgraph": "1.4.10",
+    "@tavily/core": "0.7.7",
+    "ai": "7.0.73",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@insightforge/testkit": "workspace:*",
+    "tsx": "4.23.12",
+    "vitest": "4.1.10"
+  }
+}

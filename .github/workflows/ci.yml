@@ -27,6 +27,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://insightforge:insightforge@localhost:5432/insightforge_test
       DATABASE_TEST_URL: postgresql://insightforge:insightforge@localhost:5432/insightforge_test
+      REDIS_URL: redis://localhost:6379/1
+      REDIS_TEST_URL: redis://localhost:6379/1
 
     services:
       postgres:
@@ -39,6 +41,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U insightforge -d insightforge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10

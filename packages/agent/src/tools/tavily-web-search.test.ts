@@ -123,6 +123,21 @@ describe("TavilyWebSearch", () => {
 
     expect(result).toHaveLength(2);
   });
+
+  it("converts the project millisecond timeout to Tavily seconds", async () => {
+    const { client, search } = createClient([validResult]);
+    const webSearch = new TavilyWebSearch(client);
+
+    await webSearch.search({
+      query: "ByteDance",
+      searchDepth: "basic",
+      maxResults: 3,
+      timeoutMs: 1_500,
+    });
+
+    expect(search.mock.calls[0]?.[1]).toMatchObject({ timeout: 2 });
+    expect(search.mock.calls[0]?.[1]).not.toHaveProperty("timeoutMs");
+  });
 });
 
 describe("createTavilyWebSearch", () => {

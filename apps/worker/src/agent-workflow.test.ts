@@ -3,6 +3,7 @@ import type {
   RunProgressEvent,
   RunStatus,
 } from "@insightforge/domain";
+import { ResearchExecutionLimitError } from "@insightforge/agent";
 import { UnrecoverableError } from "bullmq";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,21 @@ import {
   type ResearchAgentResult,
   type ResearchAgentRunner,
 } from "./agent-workflow";
+
+const budgets = {
+  quick: {
+    maxSearchCount: 12,
+    maxTokenUsage: 80_000,
+    maxEstimatedCostCny: 5,
+    maxDurationMs: 5 * 60 * 1000,
+  },
+  deep: {
+    maxSearchCount: 30,
+    maxTokenUsage: 200_000,
+    maxEstimatedCostCny: 15,
+    maxDurationMs: 15 * 60 * 1000,
+  },
+};
 
 const runId = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -31,6 +47,7 @@ const createRun = (status: RunStatus = "running"): ResearchRun => ({
 });
 
 const agentResult: ResearchAgentResult = {
+  runId,
   status: "completed",
   evidenceCandidates: [
     {
@@ -44,6 +61,10 @@ const agentResult: ResearchAgentResult = {
   },
   qualityWarning: null,
   visitedNodes: ["planner", "researcher", "writer", "publisher"],
+  searchCount: 3,
+  completedQuestionIds: ["q1", "q2", "q3"],
+  startedAt: "2026-08-25T00:00:00.000Z",
+  deadlineAt: "2026-08-25T00:05:00.000Z",
   tokenUsage: 120,
   estimatedCostCny: 0.12,
 };
@@ -83,6 +104,7 @@ const createHarness = (run: ResearchRun | null = createRun()) => {
     graph,
     progress,
     cancellation,
+    budgets,
   );
 
   return { workflow, runs, graph, progress, cancellation };
@@ -114,17 +136,25 @@ describe("AgentResearchWorkflow", () => {
 
     expect(harness.cancellation.assertNotCancelled).toHaveBeenCalledTimes(2);
     expect(harness.graph.invoke).toHaveBeenCalledWith({
+      runId,
       company: "OpenAI",
       focus: "technology",
       depth: "quick",
+      startedAt: "2026-08-25T00:00:00.000Z",
+      deadlineAt: "2026-08-25T00:05:00.000Z",
     });
     expect(harness.runs.saveCheckpoint).toHaveBeenCalledWith(runId, {
       checkpointKey: "agent-result",
       state: {
+        runId,
         evidenceCandidates: agentResult.evidenceCandidates,
         publishedReport: agentResult.publishedReport,
         qualityWarning: null,
         visitedNodes: agentResult.visitedNodes,
+        searchCount: 3,
+        completedQuestionIds: ["q1", "q2", "q3"],
+        startedAt: "2026-08-25T00:00:00.000Z",
+        deadlineAt: "2026-08-25T00:05:00.000Z",
         tokenUsage: 120,
         estimatedCostCny: 0.12,
       },
@@ -156,6 +186,40 @@ describe("AgentResearchWorkflow", () => {
     expect(completeOrder).toBeLessThan(completedProgressOrder);
   });
 
+  it("deep 调研使用稳定的十五分钟期限", async () => {
+    const harness = createHarness({
+      ...createRun(),
+      depth: "deep",
+    });
+
+    await harness.workflow.run(runId);
+
+    expect(harness.graph.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        depth: "deep",
+        startedAt: "2026-08-25T00:00:00.000Z",
+        deadlineAt: "2026-08-25T00:15:00.000Z",
+      }),
+    );
+  });
+
+  it("Agent 返回其他 runId 时禁止保存检查点或完成任务", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.invoke).mockResolvedValueOnce({
+      ...agentResult,
+      runId: "c0a80121-7ac0-4b18-9f20-6d9ad634b573",
+    });
+
+    await expect(harness.workflow.run(runId)).rejects.toThrow(
+      "AGENT_RUN_ID_MISMATCH",
+    );
+
+    expect(harness.cancellation.assertNotCancelled).toHaveBeenCalledOnce();
+    expect(harness.runs.saveCheckpoint).not.toHaveBeenCalled();
+    expect(harness.runs.complete).not.toHaveBeenCalled();
+  });
+
   it("Agent 执行后检测到取消时不保存或完成任务", async () => {
     const harness = createHarness();
     vi.mocked(harness.cancellation.assertNotCancelled)
@@ -165,6 +229,22 @@ describe("AgentResearchWorkflow", () => {
     await expect(harness.workflow.run(runId)).rejects.toThrow("cancelled");
 
     expect(harness.graph.invoke).toHaveBeenCalledOnce();
+    expect(harness.runs.saveCheckpoint).not.toHaveBeenCalled();
+    expect(harness.runs.complete).not.toHaveBeenCalled();
+  });
+
+  it("预算耗尽转换成 BullMQ 不可重试错误", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.invoke).mockRejectedValueOnce(
+      new ResearchExecutionLimitError("AGENT_TOKEN_BUDGET_EXCEEDED"),
+    );
+
+    await expect(harness.workflow.run(runId)).rejects.toEqual(
+      expect.objectContaining({
+        name: "UnrecoverableError",
+        message: "AGENT_TOKEN_BUDGET_EXCEEDED",
+      }),
+    );
     expect(harness.runs.saveCheckpoint).not.toHaveBeenCalled();
     expect(harness.runs.complete).not.toHaveBeenCalled();
   });

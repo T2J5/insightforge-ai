@@ -2,6 +2,12 @@ import type { ZodType } from "zod";
 
 export type ModelInput = {
   operation: string;
+  /**
+   * 本次调用允许使用的最长时间。
+   *
+   * Adapter 还会与自己的全局 timeout 取最小值。
+   */
+  timeoutMs?: number;
   messages: Array<{
     role: "system" | "user" | "assistant";
     content: string;

@@ -12,6 +12,20 @@ const mocks = vi.hoisted(() => {
   const progress = { kind: "progress" };
   const cancellation = { kind: "cancellation" };
   const workflow = { kind: "workflow" };
+  const budgets = {
+    quick: {
+      maxSearchCount: 12,
+      maxTokenUsage: 80_000,
+      maxEstimatedCostCny: 5,
+      maxDurationMs: 300_000,
+    },
+    deep: {
+      maxSearchCount: 30,
+      maxTokenUsage: 200_000,
+      maxEstimatedCostCny: 15,
+      maxDurationMs: 900_000,
+    },
+  };
 
   return {
     model,
@@ -25,6 +39,8 @@ const mocks = vi.hoisted(() => {
     progress,
     cancellation,
     workflow,
+    budgets,
+    ResearchBudgetsSchema: { parse: vi.fn((value) => value) },
     createOpenAiStructuredModel: vi.fn(() => model),
     createTavilyWebSearch: vi.fn(() => webSearch),
     createTavilyContentExtractor: vi.fn(() => contentExtractor),
@@ -55,6 +71,8 @@ vi.mock("@insightforge/agent", () => ({
   createTavilyContentExtractor: mocks.createTavilyContentExtractor,
   WebResearchTool: mocks.WebResearchTool,
   createResearchGraph: mocks.createResearchGraph,
+  ResearchBudgetsSchema: mocks.ResearchBudgetsSchema,
+  DEFAULT_RESEARCH_BUDGETS: mocks.budgets,
 }));
 
 vi.mock("@insightforge/db", () => ({
@@ -132,12 +150,19 @@ describe("createAgentResearchWorkflow", () => {
     expect(mocks.createResearchGraph).toHaveBeenCalledWith({
       model: mocks.model,
       researchTool: mocks.researchTool,
+      budgets: mocks.budgets,
+      executionGuard: mocks.cancellation,
+      operationTimeouts: {
+        modelMs: 120_000,
+        searchMs: 30_000,
+      },
     });
     expect(mocks.AgentResearchWorkflow).toHaveBeenCalledWith(
       mocks.runs,
       mocks.graph,
       mocks.progress,
       mocks.cancellation,
+      mocks.budgets,
     );
   });
 
@@ -147,6 +172,23 @@ describe("createAgentResearchWorkflow", () => {
     expect(() => createAgentResearchWorkflow()).not.toThrow();
     expect(mocks.createOpenAiStructuredModel).toHaveBeenCalledWith(
       expect.objectContaining({ maxRetries: 0 }),
+    );
+  });
+
+  it("搜索和 Token 预算允许显式配置为 0", () => {
+    vi.stubEnv("AGENT_QUICK_MAX_SEARCHES", "0");
+    vi.stubEnv("AGENT_QUICK_MAX_TOKENS", "0");
+
+    expect(() => createAgentResearchWorkflow()).not.toThrow();
+    expect(mocks.createResearchGraph).toHaveBeenCalledWith(
+      expect.objectContaining({
+        budgets: expect.objectContaining({
+          quick: expect.objectContaining({
+            maxSearchCount: 0,
+            maxTokenUsage: 0,
+          }),
+        }),
+      }),
     );
   });
 

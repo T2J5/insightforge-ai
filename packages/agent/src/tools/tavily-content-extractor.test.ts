@@ -111,6 +111,21 @@ describe("TavilyContentExtractor", () => {
     ).rejects.toThrow();
     expect(extract).not.toHaveBeenCalled();
   });
+
+  it("converts the project millisecond timeout to Tavily seconds", async () => {
+    const { client, extract } = createClient([validResult]);
+    const contentExtractor = new TavilyContentExtractor(client);
+
+    await contentExtractor.extract({
+      urls: ["https://example.com/technology"],
+      query: "ByteDance technology",
+      extractionDepth: "basic",
+      timeoutMs: 1_500,
+    });
+
+    expect(extract.mock.calls[0]?.[1]).toMatchObject({ timeout: 2 });
+    expect(extract.mock.calls[0]?.[1]).not.toHaveProperty("timeoutMs");
+  });
 });
 
 describe("createTavilyContentExtractor", () => {

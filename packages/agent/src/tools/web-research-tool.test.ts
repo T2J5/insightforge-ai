@@ -163,4 +163,43 @@ describe("WebResearchTool", () => {
       researchTool.research({ ...baseInput, depth: "quick" }),
     ).rejects.toThrow("CONTENT_EXTRACTION_EMPTY");
   });
+
+  it("passes the remaining operation timeout to search and extraction", async () => {
+    const timestamps = [1_000, 1_000, 1_250];
+    const webSearch = new FakeWebSearch(hits);
+    const contentExtractor = new FakeContentExtractor(pages);
+    const researchTool = new WebResearchTool(
+      webSearch,
+      contentExtractor,
+      () => timestamps.shift() ?? 1_250,
+    );
+
+    await researchTool.research({
+      ...baseInput,
+      depth: "quick",
+      timeoutMs: 1_000,
+    });
+
+    expect(webSearch.calls[0]).toMatchObject({ timeoutMs: 1_000 });
+    expect(contentExtractor.calls[0]).toMatchObject({ timeoutMs: 750 });
+  });
+
+  it("does not start extraction after the operation timeout is exhausted", async () => {
+    const timestamps = [1_000, 1_000, 2_000];
+    const contentExtractor = new FakeContentExtractor(pages);
+    const researchTool = new WebResearchTool(
+      new FakeWebSearch(hits),
+      contentExtractor,
+      () => timestamps.shift() ?? 2_000,
+    );
+
+    await expect(
+      researchTool.research({
+        ...baseInput,
+        depth: "quick",
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toThrow("RESEARCH_TOOL_TIMEOUT");
+    expect(contentExtractor.calls).toHaveLength(0);
+  });
 });

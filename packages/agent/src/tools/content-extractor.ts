@@ -30,6 +30,7 @@ export const ContentExtractionInputSchema = z
     urls: z.array(z.url()).min(1).max(5),
     query: z.string().trim().min(1).max(1_000),
     extractionDepth: ContentExtractionDepthSchema,
+    timeoutMs: z.int().positive().optional(),
   })
   .strict();
 export type ContentExtractionInput = z.infer<

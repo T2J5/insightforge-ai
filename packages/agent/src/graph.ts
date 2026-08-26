@@ -11,11 +11,26 @@ import {
 import {
   ResearchFindingSchema,
   ResearchToolInputSchema,
+  type ResearchFinding,
   type ResearchTool,
 } from "./tools/research-tool";
 
 import { extractEvidenceCandidates } from "./evidence-extractor";
 import { validateReportCitations } from "./report-citation";
+import {
+  assertWithinResearchBudget,
+  DEFAULT_RESEARCH_BUDGETS,
+  DEFAULT_RESEARCH_OPERATION_TIMEOUTS,
+  ResearchBudgetsSchema,
+  ResearchOperationTimeoutsSchema,
+  type ResearchBudgets,
+  type ResearchOperationKind,
+  type ResearchOperationTimeouts,
+} from "./budgets";
+
+export interface ResearchExecutionGuard {
+  assertNotCancelled(runId: string): Promise<void>;
+}
 
 /**
  * Agent 图需要的外部能力。
@@ -30,6 +45,10 @@ export interface ResearchAgentGraphDependencies {
   model: StructuredModel;
 
   researchTool: ResearchTool;
+  executionGuard: ResearchExecutionGuard;
+  budgets?: ResearchBudgets;
+  operationTimeouts?: ResearchOperationTimeouts;
+  now?: () => Date;
 }
 
 export type AfterReviewRoute = "writer" | "publisher";
@@ -106,13 +125,58 @@ const formatUsage = (usage: {
 export const createResearchGraph = ({
   model,
   researchTool,
+  executionGuard,
+  budgets: untrustedBudgets = DEFAULT_RESEARCH_BUDGETS,
+  operationTimeouts:
+    untrustedOperationTimeouts = DEFAULT_RESEARCH_OPERATION_TIMEOUTS,
+  now = () => new Date(),
 }: ResearchAgentGraphDependencies) => {
+  const budgets = ResearchBudgetsSchema.parse(untrustedBudgets);
+  const operationTimeouts = ResearchOperationTimeoutsSchema.parse(
+    untrustedOperationTimeouts,
+  );
+
+  const prepareOperation = async (
+    state: ResearchAgentStateValue,
+    operation: ResearchOperationKind,
+    additionalSearches = 0,
+  ): Promise<number> => {
+    await executionGuard.assertNotCancelled(state.runId);
+    const remainingDeadlineMs = assertWithinResearchBudget({
+      usage: {
+        depth: state.depth,
+        startedAt: state.startedAt,
+        deadlineAt: state.deadlineAt,
+        searchCount: state.searchCount,
+        tokenUsage: state.tokenUsage,
+        estimatedCostCny: state.estimatedCostCny,
+      },
+
+      budget: budgets[state.depth],
+
+      operation,
+
+      additionalSearches,
+
+      now: now(),
+    });
+
+    if (operation === "model") {
+      return Math.min(remainingDeadlineMs, operationTimeouts.modelMs);
+    }
+    if (operation === "search") {
+      return Math.min(remainingDeadlineMs, operationTimeouts.searchMs);
+    }
+    return remainingDeadlineMs;
+  };
   /**
    * planner：根据用户输入生成结构化调研计划。
    */
   const planner: typeof ResearchAgentState.Node = async (state) => {
+    const timeoutMs = await prepareOperation(state, "model");
     const result = await model.generate(ResearchPlanSchema, {
       operation: "plan-research",
+      timeoutMs,
       messages: [
         {
           role: "system",
@@ -166,37 +230,56 @@ export const createResearchGraph = ({
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
     }
-    const findings = await Promise.all(
-      state.plan.questions.map(async (question) => {
-        /**
-         * 工具输入是跨边界数据，
-         * 调用前先通过 Zod 校验。
-         */
-        const toolInput = ResearchToolInputSchema.parse({
-          company: state.company,
-          focus: state.focus,
-          depth: state.depth,
-          questionId: question.id,
-          question: question.question,
-        });
-        const toolOutput = await researchTool.research(toolInput);
-        /**
-         * 工具实现可能来自外部 SDK，
-         * TypeScript 类型不能保证运行时返回值正确，
-         * 所以工具输出也需要进行 Zod 校验。
-         */
-        const finding = ResearchFindingSchema.parse(toolOutput);
-        /**
-         * 防止工具把 q1 的结果错误标记成 q2。
-         */
-        if (finding.questionId !== question.id) {
-          throw new Error(`RESEARCH_FINDING_QUESTION_MISMATCH`);
-        }
-        return finding;
-      }),
-    );
+    // 检查点恢复时跳过已经完成的问题
+    const completedBefore = new Set(state.completedQuestionIds);
+    const pendingQuestions = state.plan.questions.filter((question) => {
+      return !completedBefore.has(question.id);
+    });
+    const newFindings: ResearchFinding[] = [];
+    const completedQuestionIds: string[] = [];
+    /**
+     * 使用顺序执行，而不是 Promise.all。
+     *
+     * 这样每个外部搜索之间都能重新检查：
+     * - Redis 取消标志；
+     * - deadline；
+     * - 搜索预算。
+     */
+    for (const question of pendingQuestions) {
+      const timeoutMs = await prepareOperation(
+        state,
+        "search",
+        // state.searchCount 尚未包含本节点已经完成的搜索, 因此把本地增量一并传给预算检查。
+        completedQuestionIds.length + 1,
+      );
+      const toolInput = ResearchToolInputSchema.parse({
+        company: state.company,
+        focus: state.focus,
+        depth: state.depth,
+        questionId: question.id,
+        question: question.question,
+        timeoutMs,
+      });
+      const toolOutput = await researchTool.research(toolInput);
+      /**
+       * 工具实现可能来自外部 SDK，
+       * TypeScript 类型不能保证运行时返回值正确，
+       * 所以工具输出也需要进行 Zod 校验。
+       */
+      const finding = ResearchFindingSchema.parse(toolOutput);
+      /**
+       * 防止工具把 q1 的结果错误标记成 q2。
+       */
+      if (finding.questionId !== question.id) {
+        throw new Error(`RESEARCH_FINDING_QUESTION_MISMATCH`);
+      }
+      newFindings.push(finding);
+      completedQuestionIds.push(question.id);
+    }
     return {
-      findings,
+      findings: [...state.findings, ...newFindings],
+      searchCount: newFindings.length,
+      completedQuestionIds,
       status: "extracting_evidence",
       visitedNodes: "researcher",
     };
@@ -209,6 +292,7 @@ export const createResearchGraph = ({
    * 然后由服务端验证引用真实性。
    */
   const evidenceExtractor: typeof ResearchAgentState.Node = async (state) => {
+    const timeoutMs = await prepareOperation(state, "model");
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
     }
@@ -224,6 +308,7 @@ export const createResearchGraph = ({
         question: question.question,
       })),
       findings: state.findings,
+      timeoutMs,
     });
     return {
       evidenceCandidates: result.candidates,
@@ -236,6 +321,7 @@ export const createResearchGraph = ({
    * writer：第一次撰写或根据评审意见修订。
    */
   const writer: typeof ResearchAgentState.Node = async (state) => {
+    const timeoutMs = await prepareOperation(state, "model");
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
     }
@@ -258,6 +344,7 @@ export const createResearchGraph = ({
 
     const result = await model.generate(ReportDraftSchema, {
       operation: isRevision ? "revise-report" : "write-report",
+      timeoutMs,
       messages: [
         {
           role: "system",
@@ -315,7 +402,8 @@ export const createResearchGraph = ({
    * 该节点不调用模型，
    * 所以不会增加 Token 和模型成本。
    */
-  const citationValidator: typeof ResearchAgentState.Node = (state) => {
+  const citationValidator: typeof ResearchAgentState.Node = async (state) => {
+    await prepareOperation(state, "deterministic");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
 
     if (state.evidenceCandidates.length === 0) {
@@ -337,6 +425,7 @@ export const createResearchGraph = ({
    * reviewer：对照计划、调研发现和报告草稿进行评审。
    */
   const reviewer: typeof ResearchAgentState.Node = async (state) => {
+    const timeoutMs = await prepareOperation(state, "model");
     if (state.citationIssues.length > 0) {
       throw new Error("REPORT_CITATIONS_INVALID");
     }
@@ -350,6 +439,7 @@ export const createResearchGraph = ({
 
     const result = await model.generate(ReviewResultSchema, {
       operation: "review-report",
+      timeoutMs,
       messages: [
         {
           role: "system",
@@ -384,7 +474,8 @@ export const createResearchGraph = ({
    *
    * 这是确定性操作，不需要调用模型。
    */
-  const publisher: typeof ResearchAgentState.Node = (state) => {
+  const publisher: typeof ResearchAgentState.Node = async (state) => {
+    await prepareOperation(state, "deterministic");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
 
     if (!state.review) throw new Error("REVIEW_RESULT_REQUIRED");

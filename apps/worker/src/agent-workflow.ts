@@ -10,6 +10,10 @@ import {
 import type { ResearchWorkflow } from "./processors/research-run";
 import { UnrecoverableError } from "bullmq";
 import type { PublishProgressInput } from "./progress-publisher";
+import {
+  isResearchExecutionLimitError,
+  type ResearchBudgets,
+} from "@insightforge/agent";
 
 export interface AgentWorkflowRunStore {
   get(runId: string): Promise<ResearchRun | null>;
@@ -30,20 +34,28 @@ export interface AgentWorkflowProgressPublisher {
 }
 
 export interface ResearchAgentResult {
+  runId: string;
   status: string;
   evidenceCandidates: unknown[];
   publishedReport: unknown;
   qualityWarning: string | null;
   visitedNodes: string[];
+  searchCount: number;
+  completedQuestionIds: string[];
+  startedAt: string;
+  deadlineAt: string;
   tokenUsage: number;
   estimatedCostCny: number;
 }
 
 export interface ResearchAgentRunner {
   invoke(input: {
+    runId: string;
     company: string;
     focus: ResearchFocus;
     depth: ResearchDepth;
+    startedAt: string;
+    deadlineAt: string;
   }): Promise<ResearchAgentResult>;
 }
 
@@ -57,6 +69,7 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
     private readonly graph: ResearchAgentRunner,
     private readonly progress: AgentWorkflowProgressPublisher,
     private readonly cancellation: AgentWorkflowCancellationGuard,
+    private readonly budgets: ResearchBudgets,
   ) {}
 
   async run(runId: string): Promise<void> {
@@ -86,16 +99,49 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
       data: {},
     });
     /**
+     * run.updatedAt 是任务进入 running 时由 Repository 更新的时间。
+     *
+     * Worker 重试 running 任务时不会重新生成 startedAt，
+     * 因此 deadlineAt 也保持稳定，不会因为重试不断向后延长。
+     */
+    const startedAt = run.updatedAt;
+    const deadlineAt = new Date(
+      startedAt.getTime() + this.budgets[run.depth].maxDurationMs,
+    );
+    /**
      * 当前使用 invoke 获取最终状态。
      *
      * 后续任务会升级为 graph.stream，
      * 在每个 Agent 节点之间执行取消检查和进度发布。
      */
-    const result = await this.graph.invoke({
-      company: run.company,
-      focus: run.focus,
-      depth: run.depth,
-    });
+    let result: ResearchAgentResult;
+    try {
+      result = await this.graph.invoke({
+        runId,
+        company: run.company,
+        focus: run.focus,
+        depth: run.depth,
+        startedAt: startedAt.toISOString(),
+        deadlineAt: deadlineAt.toISOString(),
+      });
+    } catch (error) {
+      /**
+       * 预算和总期限耗尽后重试没有意义，
+       * 转为 BullMQ 不可重试错误。
+       */
+      if (isResearchExecutionLimitError(error)) {
+        throw new UnrecoverableError(error.code);
+      }
+      throw error;
+    }
+
+    /**
+     * 防止错误的检查点或 Graph Adapter
+     * 把其他 Run 的结果保存到当前任务。
+     */
+    if (result.runId !== runId) {
+      throw new Error(`AGENT_RUN_ID_MISMATCH`);
+    }
     await this.cancellation.assertNotCancelled(runId);
     if (result.status !== "completed" || result.publishedReport === null) {
       throw new Error(`AGENT_WORKFLOW_NOT_COMPLETED`);
@@ -110,10 +156,15 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
     const checkpointState = JsonObjectSchema.parse(
       JSON.parse(
         JSON.stringify({
+          runId: result.runId,
           evidenceCandidates: result.evidenceCandidates,
           publishedReport: result.publishedReport,
           qualityWarning: result.qualityWarning,
           visitedNodes: result.visitedNodes,
+          searchCount: result.searchCount,
+          completedQuestionIds: result.completedQuestionIds,
+          startedAt: result.startedAt,
+          deadlineAt: result.deadlineAt,
           tokenUsage: result.tokenUsage,
           estimatedCostCny: result.estimatedCostCny,
         }),

@@ -7,7 +7,8 @@ import { FakeStructuredModel } from "@insightforge/testkit";
 import type { ZodType } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { createResearchGraph } from "./graph";
+import { DEFAULT_RESEARCH_BUDGETS as DEFAULT_TEST_BUDGETS } from "./budgets";
+import { createResearchGraph as createProductionResearchGraph } from "./graph";
 import type {
   ResearchFinding,
   ResearchTool,
@@ -67,10 +68,33 @@ const evidenceExtractionOutput = {
 };
 
 const input = {
+  runId: "550e8400-e29b-41d4-a716-446655440000",
   company: "ByteDance",
   focus: "technology" as const,
   depth: "quick" as const,
+  startedAt: "2026-08-25T00:00:00.000Z",
+  deadlineAt: "2026-08-25T00:05:00.000Z",
 };
+
+const executionGuard = {
+  assertNotCancelled: async (_runId: string): Promise<void> => undefined,
+};
+
+/**
+ * Graph 的单元测试使用固定时钟，避免测试结果依赖真实运行时间。
+ * executionGuard 是本任务新增的必需依赖，默认使用不取消的测试替身。
+ */
+const createResearchGraph = (
+  dependencies: Omit<
+    Parameters<typeof createProductionResearchGraph>[0],
+    "executionGuard" | "now"
+  >,
+) =>
+  createProductionResearchGraph({
+    ...dependencies,
+    executionGuard,
+    now: () => new Date("2026-08-25T00:00:01.000Z"),
+  });
 
 const createFinding = (input: ResearchToolInput): ResearchFinding => ({
   questionId: input.questionId,
@@ -114,6 +138,11 @@ describe("createResearchGraph", () => {
     const result = await graph.invoke(input);
 
     expect(result.status).toBe("completed");
+    expect(result.runId).toBe(input.runId);
+    expect(result.startedAt).toBe(input.startedAt);
+    expect(result.deadlineAt).toBe(input.deadlineAt);
+    expect(result.searchCount).toBe(1);
+    expect(result.completedQuestionIds).toEqual(["q1"]);
     expect(result.publishedReport).toEqual(firstDraft);
     expect(result.qualityWarning).toBeNull();
     expect(result.revisionCount).toBe(0);
@@ -139,6 +168,7 @@ describe("createResearchGraph", () => {
         depth: "quick",
         questionId: "q1",
         question: "ByteDance 的核心技术能力是什么？",
+        timeoutMs: 30_000,
       },
     ]);
   });
@@ -474,6 +504,38 @@ describe("createResearchGraph", () => {
     expect(model.calls.map((call) => call.operation)).toEqual([
       "plan-research",
     ]);
+  });
+
+  it("counts searches completed inside the current researcher node against the budget", async () => {
+    const twoQuestionPlan = {
+      ...plan,
+      questions: [
+        plan.questions[0],
+        {
+          id: "q2",
+          question: "ByteDance 如何建设数据基础设施？",
+          rationale: "验证搜索预算会在每次外部调用前更新",
+        },
+      ],
+    };
+    const model = new FakeStructuredModel([twoQuestionPlan]);
+    const researchTool = new FakeResearchTool();
+    const graph = createResearchGraph({
+      model,
+      researchTool,
+      budgets: {
+        quick: {
+          ...DEFAULT_TEST_BUDGETS.quick,
+          maxSearchCount: 1,
+        },
+        deep: DEFAULT_TEST_BUDGETS.deep,
+      },
+    });
+
+    await expect(graph.invoke(input)).rejects.toThrow(
+      "AGENT_SEARCH_BUDGET_EXCEEDED",
+    );
+    expect(researchTool.calls).toHaveLength(1);
   });
 
   it("rejects a finding associated with the wrong question", async () => {

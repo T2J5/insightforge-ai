@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { loadEnvFile } from "node:process";
+import { randomUUID } from "node:crypto";
 import {
   createOpenAiStructuredModel,
   createResearchGraph,
@@ -40,6 +41,10 @@ const readOptionalPositiveInteger = (name: string, fallback: number) => {
   return value;
 };
 
+const noOpExecutionGuard = {
+  async assertNotCancelled(_runId: string): Promise<void> {},
+};
+
 const main = async () => {
   const model = createOpenAiStructuredModel({
     apiKey: requireEnvironmentVariable("MODEL_API_KEY"),
@@ -65,13 +70,21 @@ const main = async () => {
   const contentExtractor = createTavilyContentExtractor(searchApiKey);
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
 
-  const graph = createResearchGraph({ model, researchTool });
-
+  const graph = createResearchGraph({
+    model,
+    researchTool,
+    executionGuard: noOpExecutionGuard,
+  });
+  const startedAt = new Date();
+  const deadlineAt = new Date(startedAt.getTime() + 5 * 60 * 1_000);
   const stream = await graph.stream(
     {
+      runId: randomUUID(),
       company: "ByteDance",
       focus: "technology",
       depth: "quick",
+      startedAt: startedAt.toISOString(),
+      deadlineAt: deadlineAt.toISOString(),
     },
     {
       streamMode: "updates",

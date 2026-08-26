@@ -36,6 +36,11 @@ export class TavilyContentExtractor implements ContentExtractorPort {
     const response = await this.client.extract(urls, {
       extractDepth: input.extractionDepth,
       format: "markdown",
+      ...(input.timeoutMs === undefined
+        ? {}
+        : {
+            timeout: Math.max(1, Math.ceil(input.timeoutMs / 1000)),
+          }),
       includeImages: false,
       includeFavicon: false,
       includeUsage: true,

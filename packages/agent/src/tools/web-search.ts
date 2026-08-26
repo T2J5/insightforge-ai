@@ -43,6 +43,7 @@ export const WebSearchInputSchema = z
      * 1-10。
      */
     maxResults: z.int().min(1).max(10),
+    timeoutMs: z.int().positive().optional(),
   })
   .strict();
 export type WebSearchInput = z.infer<typeof WebSearchInputSchema>;

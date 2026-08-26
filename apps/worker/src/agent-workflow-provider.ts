@@ -4,6 +4,8 @@ import {
   createTavilyWebSearch,
   WebResearchTool,
   createResearchGraph,
+  ResearchBudgetsSchema,
+  DEFAULT_RESEARCH_BUDGETS,
 } from "@insightforge/agent";
 import { AgentResearchWorkflow } from "./agent-workflow";
 import { getWorkerDatabaseConnection } from "./database";
@@ -37,6 +39,19 @@ const readOptionalNonNegativeNumber = (
   return num;
 };
 
+const readOptionalNonNegativeInteger = (
+  name: string,
+  fallback: number,
+): number => {
+  const value = readOptionalNonNegativeNumber(name, fallback);
+  if (!Number.isInteger(value)) {
+    throw new Error(
+      `Environment variable ${name} must be a non-negative integer`,
+    );
+  }
+  return value;
+};
+
 const readOptionalRetryCount = (name: string, fallback: number): number => {
   const value = readOptionalNonNegativeNumber(name, fallback);
 
@@ -63,6 +78,57 @@ const readOptionalPositiveInteger = (
  * 创建生产环境使用的 Agent Workflow。
  */
 export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
+  const modelTimeoutMs = readOptionalPositiveInteger(
+    "MODEL_TIMEOUT_MS",
+    120_000,
+  );
+  const searchTimeoutMs = readOptionalPositiveInteger(
+    "SEARCH_TIMEOUT_MS",
+    30_000,
+  );
+  const budgets = ResearchBudgetsSchema.parse({
+    quick: {
+      maxSearchCount: readOptionalNonNegativeInteger(
+        "AGENT_QUICK_MAX_SEARCHES",
+        DEFAULT_RESEARCH_BUDGETS.quick.maxSearchCount,
+      ),
+      maxTokenUsage: readOptionalNonNegativeInteger(
+        "AGENT_QUICK_MAX_TOKENS",
+        DEFAULT_RESEARCH_BUDGETS.quick.maxTokenUsage,
+      ),
+
+      maxEstimatedCostCny: readOptionalNonNegativeNumber(
+        "AGENT_QUICK_MAX_COST_CNY",
+        DEFAULT_RESEARCH_BUDGETS.quick.maxEstimatedCostCny,
+      ),
+
+      maxDurationMs: readOptionalPositiveInteger(
+        "AGENT_QUICK_MAX_DURATION_MS",
+        DEFAULT_RESEARCH_BUDGETS.quick.maxDurationMs,
+      ),
+    },
+    deep: {
+      maxSearchCount: readOptionalNonNegativeInteger(
+        "AGENT_DEEP_MAX_SEARCHES",
+        DEFAULT_RESEARCH_BUDGETS.deep.maxSearchCount,
+      ),
+
+      maxTokenUsage: readOptionalNonNegativeInteger(
+        "AGENT_DEEP_MAX_TOKENS",
+        DEFAULT_RESEARCH_BUDGETS.deep.maxTokenUsage,
+      ),
+
+      maxEstimatedCostCny: readOptionalNonNegativeNumber(
+        "AGENT_DEEP_MAX_COST_CNY",
+        DEFAULT_RESEARCH_BUDGETS.deep.maxEstimatedCostCny,
+      ),
+
+      maxDurationMs: readOptionalPositiveInteger(
+        "AGENT_DEEP_MAX_DURATION_MS",
+        DEFAULT_RESEARCH_BUDGETS.deep.maxDurationMs,
+      ),
+    },
+  });
   /**
    * 先校验外部服务配置。
    *
@@ -76,7 +142,7 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     modelName: process.env.MODEL_NAME?.trim() || "gpt-5.6-luna",
     baseUrl: process.env.MODEL_BASE_URL?.trim() || undefined,
     maxRetries: readOptionalRetryCount("MODEL_MAX_RETRIES", 2),
-    timeoutMs: readOptionalPositiveInteger("MODEL_TIMEOUT_MS", 120_000),
+    timeoutMs: modelTimeoutMs,
     maxOutputTokens: readOptionalPositiveInteger(
       "MODEL_MAX_OUTPUT_TOKENS",
       8_000,
@@ -93,11 +159,28 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
   const webSearch = createTavilyWebSearch(searchApiKey);
   const contentExtractor = createTavilyContentExtractor(searchApiKey);
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
-  const graph = createResearchGraph({ model, researchTool });
-  const database = getWorkerDatabaseConnection();
   const redis = getWorkerRedis();
+  const database = getWorkerDatabaseConnection();
   const runs = new RunRepository(database.db);
   const progress = new ProgressPublisher(redis);
   const cancellation = new CancellationGuard(redis);
-  return new AgentResearchWorkflow(runs, graph, progress, cancellation);
+
+  const graph = createResearchGraph({
+    model,
+    researchTool,
+    budgets,
+    executionGuard: cancellation,
+    operationTimeouts: {
+      modelMs: modelTimeoutMs,
+      searchMs: searchTimeoutMs,
+    },
+  });
+
+  return new AgentResearchWorkflow(
+    runs,
+    graph,
+    progress,
+    cancellation,
+    budgets,
+  );
 };

@@ -1,5 +1,5 @@
 import { FakeStructuredModel } from "@insightforge/testkit";
-
+import { randomUUID } from "node:crypto";
 import {
   createResearchGraph,
   type ResearchTool,
@@ -86,7 +86,7 @@ const passedReview = {
 
   issues: [],
 };
-
+const startedAt = new Date();
 /**
  * Agent 的初始输入。
  *
@@ -94,11 +94,16 @@ const passedReview = {
  * 不需要调用方传入。
  */
 const input = {
+  runId: randomUUID(),
   company: "ByteDance",
 
   focus: "technology" as const,
 
   depth: "quick" as const,
+
+  startedAt: startedAt.toISOString(),
+
+  deadlineAt: new Date(startedAt.getTime() + 5 * 60 * 1_000).toISOString(),
 };
 /**
  * 学习阶段使用的假调研工具。
@@ -162,6 +167,9 @@ const createDemoModel = () =>
     passedReview,
   ]);
 
+const noOpExecutionGuard = {
+  async assertNotCancelled(_runId: string): Promise<void> {},
+};
 const main = async (): Promise<void> => {
   console.log("\n=== LangGraph 节点局部更新 ===\n");
 
@@ -171,6 +179,7 @@ const main = async (): Promise<void> => {
   const streamGraph = createResearchGraph({
     model: createDemoModel(),
     researchTool: new DemoResearchTool(),
+    executionGuard: noOpExecutionGuard,
   });
 
   /**
@@ -216,6 +225,7 @@ const main = async (): Promise<void> => {
   const invokeGraph = createResearchGraph({
     model: createDemoModel(),
     researchTool: new DemoResearchTool(),
+    executionGuard: noOpExecutionGuard,
   });
 
   const result = await invokeGraph.invoke(input);
@@ -225,7 +235,12 @@ const main = async (): Promise<void> => {
    */
   console.dir(
     {
+      runId: result.runId,
       status: result.status,
+      startedAt: result.startedAt,
+      deadlineAt: result.deadlineAt,
+      searchCount: result.searchCount,
+      completedQuestionIds: result.completedQuestionIds,
 
       revisionCount: result.revisionCount,
 

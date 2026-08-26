@@ -14,6 +14,7 @@ export const ResearchToolInputSchema = z
     depth: ResearchDepthSchema,
     questionId: z.string().trim().min(1).max(50),
     question: z.string().trim().min(1).max(500),
+    timeoutMs: z.int().positive().optional(),
   })
   .strict();
 

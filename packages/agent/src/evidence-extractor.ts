@@ -31,6 +31,7 @@ export interface ExtractEvidenceCandidatesInput {
   model: StructuredModel;
   questions: EvidenceExtractionQuestion[];
   findings: ResearchFinding[];
+  timeoutMs?: number;
 }
 
 /**
@@ -143,6 +144,7 @@ export const extractEvidenceCandidates = async ({
   model,
   questions,
   findings,
+  timeoutMs,
 }: ExtractEvidenceCandidatesInput): Promise<ExtractEvidenceCandidatesResult> => {
   /**
    * 不把 summary 和 sources 重复提交给模型。
@@ -171,6 +173,7 @@ export const extractEvidenceCandidates = async ({
 
   const result = await model.generate(EvidenceExtractionModelOutputSchema, {
     operation: "extract-evidence",
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
     messages: [
       {
         role: "system",

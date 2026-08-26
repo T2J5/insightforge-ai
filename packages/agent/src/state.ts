@@ -9,6 +9,13 @@ import {
 } from "./report-citation";
 
 /**
+ * Agent 调研计划中的问题 ID。
+ *
+ * 后续 findings、completedQuestionIds 和证据都通过该 ID
+ * 关联到 planner 生成的问题。
+ */
+export const ResearchQuestionIdSchema = z.string().trim().min(1).max(50);
+/**
  * planner 生成的单个调研问题。
  *
  * id：
@@ -22,7 +29,7 @@ import {
  */
 export const ResearchQuestionSchema = z
   .object({
-    id: z.string().trim().min(1).max(50),
+    id: ResearchQuestionIdSchema,
     question: z.string().trim().min(1).max(500),
     rationale: z.string().trim().min(1).max(1_000),
   })
@@ -125,6 +132,26 @@ export type AgentWorkflowStatus = z.infer<typeof AgentWorkflowStatusSchema>;
  * 然后只返回自己产生的局部更新。
  */
 export const ResearchAgentState = new StateSchema({
+  /**
+   * 对应 PostgreSQL research_runs.id。
+   *
+   * Agent 检查点恢复时，必须知道状态属于哪个业务任务。
+   */
+  runId: z.uuid(),
+  /**
+   * Worker 首次把任务转换为 running 的时间。
+   *
+   * 使用 ISO 字符串而不是 Date，
+   * 保证状态可以安全写入 PostgreSQL JSONB。
+   */
+  startedAt: z.iso.datetime({ offset: true }), // offset:true 保证时区信息不会丢失
+  /**
+   * 整个 Agent 工作流的最晚完成时间。
+   *
+   * Task 4.2 只保存该字段；
+   * Task 4.4 才会在每个节点执行前检查是否超时。
+   */
+  deadlineAt: z.iso.datetime({ offset: true }),
   company: z.string().trim().min(2).max(120),
   focus: ResearchFocusSchema,
   depth: ResearchDepthSchema,
@@ -144,6 +171,33 @@ export const ResearchAgentState = new StateSchema({
     .array(ResearchFindingSchema)
     .max(8)
     .default(() => []),
+  /**
+   * 已成功执行的调研搜索次数。
+   *
+   * 每个 researcher 调用返回本次新增的搜索次数，
+   * Reducer 将不同节点或恢复执行产生的增量累加。
+   */
+  searchCount: new ReducedValue(z.int().nonnegative().default(0), {
+    inputSchema: z.int().nonnegative(),
+    reducer: (cur, inc) => cur + inc,
+  }),
+  /**
+   * 已经成功获得调研结果的问题 ID。
+   *
+   * 使用追加并去重的 Reducer：
+   * - Worker 重试时重复完成同一问题不会产生重复 ID；
+   * - 后续可以根据该字段跳过已经完成的问题。
+   */
+  completedQuestionIds: new ReducedValue(
+    z
+      .array(ResearchQuestionIdSchema)
+      .max(8)
+      .default(() => []),
+    {
+      inputSchema: z.array(ResearchQuestionIdSchema).max(8),
+      reducer: (cur, incoming) => [...new Set([...cur, ...incoming])],
+    },
+  ),
   /**
    * 经过 URL 和逐字引用校验的候选证据。
    *

@@ -26,10 +26,28 @@ export class WebResearchTool implements ResearchTool {
   constructor(
     private readonly webSearch: WebSearchPort,
     private readonly contentExtractor: ContentExtractorPort,
+    private readonly now: () => number = Date.now,
   ) {}
 
   async research(untrustedInput: ResearchToolInput): Promise<ResearchFinding> {
     const input = ResearchToolInputSchema.parse(untrustedInput);
+    const operationStartedAt = this.now();
+    /**
+     * 计算当前调用还剩多少时间。
+     */
+    const getRemainingTimeoutMs = (): number | undefined => {
+      if (input.timeoutMs === undefined) {
+        return undefined;
+      }
+
+      const remaining = input.timeoutMs - (this.now() - operationStartedAt);
+
+      if (remaining < 1) {
+        throw new Error("RESEARCH_TOOL_TIMEOUT");
+      }
+
+      return Math.ceil(remaining);
+    };
 
     /**
      * quick：
@@ -42,6 +60,11 @@ export class WebResearchTool implements ResearchTool {
       query: `${input.company} ${input.question}`,
       searchDepth: input.depth === "quick" ? "basic" : "advanced",
       maxResults: input.depth === "quick" ? 3 : 5,
+      ...(input.timeoutMs === undefined
+        ? {}
+        : {
+            timeoutMs: getRemainingTimeoutMs(),
+          }),
     };
     const hits = await this.webSearch.search(searchInput);
     /**
@@ -64,6 +87,11 @@ export class WebResearchTool implements ResearchTool {
       urls: hits.map((hit) => hit.url),
       query: input.question,
       extractionDepth: input.depth === "quick" ? "basic" : "advanced",
+      ...(input.timeoutMs === undefined
+        ? {}
+        : {
+            timeoutMs: getRemainingTimeoutMs(),
+          }),
     };
     const untrustedPages = await this.contentExtractor.extract(extractionInput);
 

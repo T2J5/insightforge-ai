@@ -62,6 +62,11 @@ export class TavilyWebSearch implements WebSearchPort {
       searchDepth: input.searchDepth,
       topic: "general",
       maxResults: input.maxResults,
+      ...(input.timeoutMs === undefined
+        ? {}
+        : {
+            timeout: Math.max(1, Math.ceil(input.timeoutMs / 1000)),
+          }),
       /**
        * 目前只使用搜索结果，不采用 Tavily 自动生成的答案。
        *

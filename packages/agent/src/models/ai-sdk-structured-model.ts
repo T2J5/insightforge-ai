@@ -115,6 +115,10 @@ export class AiSdkStructuredModel implements StructuredModel {
       throw new Error("MODEL_CONVERSATION_REQUIRED");
     }
 
+    const requestedTimeoutMs = input.timeoutMs ?? this.timeoutMs;
+    assertPositiveInteger(requestedTimeoutMs, "MODEL_TIMEOUT_INVALID");
+    const effectiveTimeoutMs = Math.min(requestedTimeoutMs, this.timeoutMs);
+
     const result = await generateText({
       model: this.model,
       system,
@@ -132,7 +136,7 @@ export class AiSdkStructuredModel implements StructuredModel {
         description: `Structured output for ${input.operation}`,
       }),
       maxRetries: this.maxRetries,
-      timeout: this.timeoutMs,
+      timeout: effectiveTimeoutMs,
       maxOutputTokens: this.maxOutputTokens,
     });
 

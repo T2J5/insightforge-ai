@@ -13,6 +13,7 @@ import { getWorkerRedis } from "./redis";
 import { RunRepository } from "@insightforge/db";
 import { ProgressPublisher } from "./progress-publisher";
 import { CancellationGuard } from "./cancellation";
+import { getWorkerAgentCheckpointer } from "./checkpointer";
 
 const requireEnvironmentVariable = (name: string): string => {
   const value = process.env[name]?.trim();
@@ -161,6 +162,7 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
   const redis = getWorkerRedis();
   const database = getWorkerDatabaseConnection();
+  const checkpointer = getWorkerAgentCheckpointer();
   const runs = new RunRepository(database.db);
   const progress = new ProgressPublisher(redis);
   const cancellation = new CancellationGuard(redis);
@@ -169,6 +171,7 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     model,
     researchTool,
     budgets,
+    checkpointer,
     executionGuard: cancellation,
     operationTimeouts: {
       modelMs: modelTimeoutMs,

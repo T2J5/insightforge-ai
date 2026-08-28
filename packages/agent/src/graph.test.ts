@@ -4,8 +4,9 @@ import type {
   StructuredModel,
 } from "@insightforge/domain";
 import { FakeStructuredModel } from "@insightforge/testkit";
+import { MemorySaver } from "@langchain/langgraph";
 import type { ZodType } from "zod";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_RESEARCH_BUDGETS as DEFAULT_TEST_BUDGETS } from "./budgets";
 import { createResearchGraph as createProductionResearchGraph } from "./graph";
@@ -170,6 +171,170 @@ describe("createResearchGraph", () => {
         question: "ByteDance 的核心技术能力是什么？",
         timeoutMs: 30_000,
       },
+    ]);
+  });
+
+  it("persists graph state when a checkpointer and thread_id are provided", async () => {
+    const checkpointer = new MemorySaver();
+    const model = new FakeStructuredModel([
+      plan,
+      evidenceExtractionOutput,
+      firstDraft,
+      passedReview,
+    ]);
+    const graph = createResearchGraph({
+      model,
+      researchTool: new FakeResearchTool(),
+      checkpointer,
+    });
+    const config = {
+      configurable: {
+        thread_id: input.runId,
+      },
+    };
+
+    const result = await graph.invoke(input, config);
+    const checkpoint = await checkpointer.getTuple(config);
+
+    expect(result.status).toBe("completed");
+    expect(checkpoint).toBeDefined();
+    expect(checkpoint?.checkpoint.channel_values).toEqual(
+      expect.objectContaining({
+        runId: input.runId,
+        status: "completed",
+        publishedReport: firstDraft,
+      }),
+    );
+  });
+
+  it("stops before planner when the run has been cancelled", async () => {
+    const cancellationError = new Error("RESEARCH_RUN_CANCELLED");
+    const cancellationGuard = {
+      assertNotCancelled: vi.fn().mockRejectedValue(cancellationError),
+    };
+    const model = new FakeStructuredModel([plan]);
+    const researchTool = new FakeResearchTool();
+    const graph = createProductionResearchGraph({
+      model,
+      researchTool,
+      executionGuard: cancellationGuard,
+      now: () => new Date("2026-08-25T00:00:01.000Z"),
+    });
+
+    await expect(graph.invoke(input)).rejects.toBe(cancellationError);
+
+    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledOnce();
+    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledWith(
+      input.runId,
+    );
+    expect(model.calls).toHaveLength(0);
+    expect(researchTool.calls).toHaveLength(0);
+  });
+
+  it("checks cancellation again between individual research operations", async () => {
+    const twoQuestionPlan = {
+      ...plan,
+      questions: [
+        plan.questions[0],
+        {
+          id: "q2",
+          question: "ByteDance 如何建设数据基础设施？",
+          rationale: "验证搜索之间会重新检查取消状态",
+        },
+      ],
+    };
+    const cancellationError = new Error("RESEARCH_RUN_CANCELLED");
+    const cancellationGuard = {
+      assertNotCancelled: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(cancellationError),
+    };
+    const model = new FakeStructuredModel([twoQuestionPlan]);
+    const researchTool = new FakeResearchTool();
+    const graph = createProductionResearchGraph({
+      model,
+      researchTool,
+      executionGuard: cancellationGuard,
+      now: () => new Date("2026-08-25T00:00:01.000Z"),
+    });
+
+    await expect(graph.invoke(input)).rejects.toBe(cancellationError);
+
+    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledTimes(3);
+    expect(researchTool.calls.map((call) => call.questionId)).toEqual(["q1"]);
+    expect(model.calls.map((call) => call.operation)).toEqual([
+      "plan-research",
+    ]);
+  });
+
+  it("resumes from the last committed checkpoint without repeating completed nodes", async () => {
+    const checkpointer = new MemorySaver();
+    const model = new FakeStructuredModel([
+      plan,
+      evidenceExtractionOutput,
+      firstDraft,
+      passedReview,
+    ]);
+    let searchAttempts = 0;
+    const researchTool = new FakeResearchTool(async (toolInput) => {
+      searchAttempts += 1;
+      if (searchAttempts === 1) {
+        throw new Error("SEARCH_TEMPORARILY_UNAVAILABLE");
+      }
+      return createFinding(toolInput);
+    });
+    const graph = createResearchGraph({
+      model,
+      researchTool,
+      checkpointer,
+    });
+    const config = {
+      configurable: {
+        thread_id: input.runId,
+      },
+      durability: "sync" as const,
+    };
+
+    await expect(graph.invoke(input, config)).rejects.toThrow(
+      "SEARCH_TEMPORARILY_UNAVAILABLE",
+    );
+
+    const failedSnapshot = await graph.getState(config);
+    expect(failedSnapshot.values).toEqual(
+      expect.objectContaining({
+        runId: input.runId,
+        plan,
+        visitedNodes: ["planner"],
+      }),
+    );
+    expect(failedSnapshot.next).toContain("researcher");
+    expect(
+      model.calls.filter((call) => call.operation === "plan-research"),
+    ).toHaveLength(1);
+
+    const result = await graph.invoke(null, config);
+
+    expect(result.status).toBe("completed");
+    expect(result.visitedNodes).toEqual([
+      "planner",
+      "researcher",
+      "evidenceExtractor",
+      "writer",
+      "citationValidator",
+      "reviewer",
+      "publisher",
+    ]);
+    expect(searchAttempts).toBe(2);
+    expect(
+      model.calls.filter((call) => call.operation === "plan-research"),
+    ).toHaveLength(1);
+    expect(model.calls.map((call) => call.operation)).toEqual([
+      "plan-research",
+      "extract-evidence",
+      "write-report",
+      "review-report",
     ]);
   });
 

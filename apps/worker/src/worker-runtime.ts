@@ -6,6 +6,7 @@ export interface WorkerRuntimeDependencies {
   worker: ManagedResearchWorker;
   closeRedis: () => Promise<void>;
   closeDatabase: () => Promise<void>;
+  closeCheckpointer: () => Promise<void>;
 }
 /**
  * 管理 Worker 进程中的资源生命周期。
@@ -64,6 +65,7 @@ export class WorkerRuntime {
     const resourceResults = await Promise.allSettled([
       this.dependencies.closeRedis(),
       this.dependencies.closeDatabase(),
+      this.dependencies.closeCheckpointer(),
     ]);
 
     for (const result of resourceResults) {

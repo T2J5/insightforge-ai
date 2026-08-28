@@ -126,6 +126,53 @@ export const AgentWorkflowStatusSchema = z.enum([
 export type AgentWorkflowStatus = z.infer<typeof AgentWorkflowStatusSchema>;
 
 /**
+ * Checkpoint 中必须保持稳定的业务身份字段。
+ *
+ * Worker 恢复前会把这些字段与 research_runs 记录比较，
+ * 防止损坏或串线的 Checkpoint 触发错误的外部调用。
+ */
+export const ResearchAgentCheckpointIdentitySchema = z.object({
+  runId: z.uuid(),
+  company: z.string().trim().min(2).max(120),
+  focus: ResearchFocusSchema,
+  depth: ResearchDepthSchema,
+  startedAt: z.iso.datetime({ offset: true }),
+  deadlineAt: z.iso.datetime({ offset: true }),
+});
+
+export type ResearchAgentCheckpointIdentity = z.infer<
+  typeof ResearchAgentCheckpointIdentitySchema
+>;
+/**
+ * Graph 完成后，Worker 真正需要保存和提交的结果。
+ *
+ * 没有使用 strict()：
+ * LangGraph 完整 State 还包含 plan、findings、draft、review 等字段；
+ * 这里解析后只保留 Worker 需要的最终字段。
+ */
+export const ResearchAgentCompletedResultSchema = z.object({
+  runId: z.uuid(),
+  status: z.literal("completed"),
+  evidenceCandidates: z.array(EvidenceCandidateSchema).max(12),
+  /**
+   * completed 状态必须存在已发布报告，
+   * 因此这里不是 nullable。
+   */
+  publishedReport: ReportDraftSchema,
+  qualityWarning: z.string().trim().min(1).max(2_000).nullable(),
+  visitedNodes: z.array(z.string().trim().min(1)).max(100),
+  searchCount: z.int().nonnegative(),
+  completedQuestionIds: z.array(ResearchQuestionIdSchema).max(8),
+  startedAt: z.iso.datetime({ offset: true }),
+  deadlineAt: z.iso.datetime({ offset: true }),
+  tokenUsage: z.int().nonnegative(),
+  estimatedCostCny: z.number().finite().nonnegative(),
+});
+
+export type ResearchAgentCompletedResult = z.infer<
+  typeof ResearchAgentCompletedResultSchema
+>;
+/**
  * LangGraph 工作流的共享状态。
  *
  * 每个节点都读取这个 State，

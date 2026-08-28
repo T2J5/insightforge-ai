@@ -1,6 +1,6 @@
 # InsightForge AI 项目进度
 
-> 最后更新：2026-08-25（Asia/Shanghai）
+> 最后更新：2026-08-28（Asia/Shanghai）
 > 状态说明：✅ 已完成｜🚧 进行中｜🧪 待验证｜⏳ 待开始｜⛔ 阻塞
 
 ## 总览
@@ -10,7 +10,7 @@
 | 任务 1：TypeScript 工作区与测试工具  | ✅   | 5/5    |
 | 任务 2：领域契约与 PostgreSQL 持久化 | ✅   | 6/6    |
 | 任务 3：异步运行、队列、进度与取消   | ✅   | 6/6    |
-| 任务 4：LangGraph 调研工作流         | 🚧   | 2/7    |
+| 任务 4：LangGraph 调研工作流         | 🚧   | 6/7    |
 | 任务 5：公开网页调研与标准化证据     | ⏳   | 0/7    |
 | 任务 6：文档摄取与混合 RAG           | ⏳   | 0/7    |
 | 任务 7：报告生成、评审与发布         | ⏳   | 0/8    |
@@ -20,7 +20,7 @@
 | 任务 11：公开产品体验                | ⏳   | 0/7    |
 | 任务 12：部署与作品集包装            | ⏳   | 0/8    |
 
-当前主线：任务 4。Agent 图、真实模型适配、公开网页搜索、证据提取、写作、评审和发布节点已经可以运行；下一个明确交付物是补齐可配置预算、超时和节点级取消保护，再实现 PostgreSQL 检查点恢复。
+当前主线：任务 4。Agent 图、预算与超时保护、节点级取消、PostgreSQL Checkpointer 和服务重启恢复行为已经完成并通过全仓质量门禁；下一步是整理提交并创建 Task 4 PR。
 
 ## 任务 1：建立 TypeScript 工作区和确定性测试工具
 
@@ -60,13 +60,24 @@
 
 ## 任务 4：实现带检查点的 LangGraph 调研工作流
 
-- [x] 4.1 编写正常路由、引用修订和评审修订上限测试；恢复行为测试待 4.5 补充。
-- [ ] 4.2 🚧 已实现 LangGraph StateSchema 与 Token、成本、修订次数 Reducer；待补预算、期限和恢复游标字段。
+- [x] 4.1 编写正常路由、引用修订、评审修订上限和恢复行为测试。
+- [x] 4.2 实现 LangGraph StateSchema，以及 Token、成本、搜索次数、修订次数和恢复上下文 Reducer。
 - [x] 4.3 实现 planner、researcher、evidenceExtractor、writer、citationValidator、reviewer、publisher 及确定性条件边。
-- [ ] 4.4 为每个节点添加预算、超时和取消保护。
-- [ ] 4.5 连接 PostgreSQL 检查点与服务重启恢复行为。
-- [ ] 4.6 运行图路由、检查点和恢复测试。
+- [x] 4.4 为每个模型和工具操作添加预算、超时和取消保护。
+- [x] 4.5 连接 PostgreSQL Checkpointer，实现 Worker 重试与服务重启恢复行为。
+- [x] 4.6 运行图路由、预算、取消、检查点和恢复测试。
 - [ ] 4.7 提交 LangGraph 工作流实现。
+
+### 任务 4 验收结果
+
+- Agent Graph 使用确定性条件边控制引用修订、质量修订和最终发布，避免模型自行决定无限循环。
+- quick/deep 调研分别限制搜索次数、Token、预估成本和总时长，模型与搜索操作具有独立超时上限。
+- 每个 Agent 节点执行前检查取消状态，researcher 在每次外部搜索之间重新检查取消状态。
+- LangGraph 使用独立的 `langgraph` PostgreSQL Schema 保存节点状态和 pending writes，并以 ResearchRun ID 作为 `thread_id`。
+- Worker 重试会读取最新 StateSnapshot；未完成 Graph 使用 `null` 输入恢复，已完成 Graph 直接提交业务结果。
+- Checkpoint 恢复前校验 Run 身份，损坏或串用的 Checkpoint 使用不可重试错误终止。
+- 恢复测试证明 researcher 临时失败后可以从已提交 checkpoint 继续，且不会重复执行 planner。
+- 全仓格式化、lint、类型检查通过；41 个测试文件、355 项测试通过。
 
 ## 任务 5：添加公开网页调研和标准化证据
 

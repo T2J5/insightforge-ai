@@ -13,6 +13,7 @@ import {
 import { createResearchWorker } from "./research-worker";
 import { ProgressPublisher } from "./progress-publisher";
 import { RunRepository } from "@insightforge/db";
+import { closeWorkerAgentCheckpointer } from "./checkpointer";
 
 /**
  * 本地开发时加载仓库根目录的 .env。
@@ -36,6 +37,7 @@ const main = async () => {
       worker,
       closeRedis: closeWorkerRedis,
       closeDatabase: closeWorkerDatabaseConnection,
+      closeCheckpointer: closeWorkerAgentCheckpointer,
     });
     /**
      * 最终失败处理器使用相同的数据库和 Redis 单例。
@@ -100,6 +102,7 @@ const main = async () => {
       await Promise.allSettled([
         closeWorkerRedis(),
         closeWorkerDatabaseConnection(),
+        closeWorkerAgentCheckpointer(),
       ]);
     }
   }

@@ -1,5 +1,10 @@
 import type { StructuredModel } from "@insightforge/domain";
-import { END, START, StateGraph } from "@langchain/langgraph";
+import {
+  END,
+  START,
+  StateGraph,
+  type BaseCheckpointSaver,
+} from "@langchain/langgraph";
 
 import {
   ResearchAgentState,
@@ -43,9 +48,15 @@ export interface ResearchExecutionGuard {
  */
 export interface ResearchAgentGraphDependencies {
   model: StructuredModel;
-
   researchTool: ResearchTool;
   executionGuard: ResearchExecutionGuard;
+  /**
+   * 可选的 LangGraph 状态持久化实现。
+   *
+   * 测试和示例可以不传；
+   * 生产 Worker 传入 PostgresSaver。
+   */
+  checkpointer?: BaseCheckpointSaver;
   budgets?: ResearchBudgets;
   operationTimeouts?: ResearchOperationTimeouts;
   now?: () => Date;
@@ -126,6 +137,7 @@ export const createResearchGraph = ({
   model,
   researchTool,
   executionGuard,
+  checkpointer,
   budgets: untrustedBudgets = DEFAULT_RESEARCH_BUDGETS,
   operationTimeouts:
     untrustedOperationTimeouts = DEFAULT_RESEARCH_OPERATION_TIMEOUTS,
@@ -528,5 +540,7 @@ export const createResearchGraph = ({
       publisher: "publisher",
     })
     .addEdge("publisher", END)
-    .compile();
+    .compile({
+      checkpointer,
+    });
 };

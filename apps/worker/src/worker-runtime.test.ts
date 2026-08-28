@@ -24,6 +24,9 @@ const createHarness = () => {
     closeDatabase: vi.fn(async () => {
       calls.push("database.close");
     }),
+    closeCheckpointer: vi.fn(async () => {
+      calls.push("checkpointer.close");
+    }),
   };
 
   return {
@@ -53,6 +56,7 @@ describe("WorkerRuntime", () => {
     expect(harness.calls[0]).toBe("worker.ready");
     expect(harness.calls[1]).toBe("worker.close");
     expect(harness.calls.slice(2).sort()).toEqual([
+      "checkpointer.close",
       "database.close",
       "redis.close",
     ]);
@@ -70,6 +74,7 @@ describe("WorkerRuntime", () => {
     expect(harness.worker.close).toHaveBeenCalledOnce();
     expect(harness.dependencies.closeRedis).toHaveBeenCalledOnce();
     expect(harness.dependencies.closeDatabase).toHaveBeenCalledOnce();
+    expect(harness.dependencies.closeCheckpointer).toHaveBeenCalledOnce();
   });
 
   it("某个关闭步骤失败时仍尝试释放全部资源并返回稳定错误", async () => {
@@ -87,6 +92,7 @@ describe("WorkerRuntime", () => {
     expect(harness.worker.close).toHaveBeenCalledOnce();
     expect(harness.dependencies.closeRedis).toHaveBeenCalledOnce();
     expect(harness.dependencies.closeDatabase).toHaveBeenCalledOnce();
+    expect(harness.dependencies.closeCheckpointer).toHaveBeenCalledOnce();
   });
 
   it("关闭开始后不允许重新启动", async () => {

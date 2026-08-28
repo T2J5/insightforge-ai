@@ -52,12 +52,25 @@ const agentResult: ResearchAgentResult = {
   evidenceCandidates: [
     {
       evidenceId: "E1",
+      questionId: "q1",
       claim: "OpenAI develops AI systems.",
+      sourceUrl: "https://example.com/openai",
+      sourceTitle: "OpenAI overview",
+      quote: "OpenAI develops and deploys artificial intelligence systems.",
+      confidence: 0.9,
     },
   ],
   publishedReport: {
     title: "OpenAI 企业调研",
     executiveSummary: "OpenAI 从事人工智能研究与产品开发。",
+    executiveSummaryEvidenceIds: ["E1"],
+    sections: [
+      {
+        heading: "核心业务",
+        markdown: "OpenAI 开发并部署人工智能系统。",
+        evidenceIds: ["E1"],
+      },
+    ],
   },
   qualityWarning: null,
   visitedNodes: ["planner", "researcher", "writer", "publisher"],
@@ -67,6 +80,20 @@ const agentResult: ResearchAgentResult = {
   deadlineAt: "2026-08-25T00:05:00.000Z",
   tokenUsage: 120,
   estimatedCostCny: 0.12,
+};
+
+const checkpointIdentity = {
+  runId,
+  company: "OpenAI",
+  focus: "technology" as const,
+  depth: "quick" as const,
+  startedAt: "2026-08-25T00:00:00.000Z",
+  deadlineAt: "2026-08-25T00:05:00.000Z",
+};
+
+const completedCheckpoint = {
+  ...checkpointIdentity,
+  ...agentResult,
 };
 
 const progressEvent = (id: number, status: RunStatus): RunProgressEvent => ({
@@ -89,6 +116,10 @@ const createHarness = (run: ResearchRun | null = createRun()) => {
   };
   const graph: ResearchAgentRunner = {
     invoke: vi.fn().mockResolvedValue(agentResult),
+    getState: vi.fn().mockResolvedValue({
+      values: {},
+      next: [],
+    }),
   };
   const progress: AgentWorkflowProgressPublisher = {
     publish: vi
@@ -135,14 +166,22 @@ describe("AgentResearchWorkflow", () => {
     await harness.workflow.run(runId);
 
     expect(harness.cancellation.assertNotCancelled).toHaveBeenCalledTimes(2);
-    expect(harness.graph.invoke).toHaveBeenCalledWith({
-      runId,
-      company: "OpenAI",
-      focus: "technology",
-      depth: "quick",
-      startedAt: "2026-08-25T00:00:00.000Z",
-      deadlineAt: "2026-08-25T00:05:00.000Z",
-    });
+    expect(harness.graph.invoke).toHaveBeenCalledWith(
+      {
+        runId,
+        company: "OpenAI",
+        focus: "technology",
+        depth: "quick",
+        startedAt: "2026-08-25T00:00:00.000Z",
+        deadlineAt: "2026-08-25T00:05:00.000Z",
+      },
+      {
+        configurable: {
+          thread_id: runId,
+        },
+        durability: "sync",
+      },
+    );
     expect(harness.runs.saveCheckpoint).toHaveBeenCalledWith(runId, {
       checkpointKey: "agent-result",
       state: {
@@ -201,7 +240,114 @@ describe("AgentResearchWorkflow", () => {
         startedAt: "2026-08-25T00:00:00.000Z",
         deadlineAt: "2026-08-25T00:15:00.000Z",
       }),
+      {
+        configurable: {
+          thread_id: runId,
+        },
+        durability: "sync",
+      },
     );
+  });
+
+  it("存在未完成 Checkpoint 时使用 null 从待执行节点恢复", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.getState).mockResolvedValueOnce({
+      values: {
+        ...checkpointIdentity,
+        status: "researching",
+      },
+      next: ["researcher"],
+      createdAt: "2026-08-25T00:01:00.000Z",
+    });
+
+    await harness.workflow.run(runId);
+
+    expect(harness.graph.invoke).toHaveBeenCalledOnce();
+    expect(harness.graph.invoke).toHaveBeenCalledWith(null, {
+      configurable: { thread_id: runId },
+      durability: "sync",
+    });
+    expect(harness.progress.publish).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        message: "Agent 从 PostgreSQL Checkpoint 恢复执行",
+        data: {
+          executionMode: "resume",
+          pendingNodes: ["researcher"],
+        },
+      }),
+    );
+  });
+
+  it("Graph 已完成时直接使用 Checkpoint 完成业务任务", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.getState).mockResolvedValueOnce({
+      values: completedCheckpoint,
+      next: [],
+      createdAt: "2026-08-25T00:04:00.000Z",
+    });
+
+    await harness.workflow.run(runId);
+
+    expect(harness.graph.invoke).not.toHaveBeenCalled();
+    expect(harness.runs.saveCheckpoint).toHaveBeenCalledOnce();
+    expect(harness.runs.complete).toHaveBeenCalledWith(runId, {
+      tokenUsage: agentResult.tokenUsage,
+      estimatedCostCny: agentResult.estimatedCostCny,
+    });
+    expect(harness.progress.publish).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        message: "Agent 使用已完成 Checkpoint 提交调研结果",
+        data: {
+          executionMode: "finalize",
+          pendingNodes: [],
+        },
+      }),
+    );
+  });
+
+  it("Checkpoint 身份与当前 Run 不一致时禁止恢复", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.getState).mockResolvedValueOnce({
+      values: {
+        ...checkpointIdentity,
+        company: "Another company",
+      },
+      next: ["researcher"],
+      createdAt: "2026-08-25T00:01:00.000Z",
+    });
+
+    await expect(harness.workflow.run(runId)).rejects.toEqual(
+      expect.objectContaining({
+        name: "UnrecoverableError",
+        message: "AGENT_CHECKPOINT_IDENTITY_CONFLICT",
+      }),
+    );
+    expect(harness.graph.invoke).not.toHaveBeenCalled();
+    expect(harness.runs.complete).not.toHaveBeenCalled();
+  });
+
+  it("已结束但损坏的 Checkpoint 不能完成业务任务", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.graph.getState).mockResolvedValueOnce({
+      values: {
+        ...checkpointIdentity,
+        status: "completed",
+        publishedReport: null,
+      },
+      next: [],
+      createdAt: "2026-08-25T00:04:00.000Z",
+    });
+
+    await expect(harness.workflow.run(runId)).rejects.toEqual(
+      expect.objectContaining({
+        name: "UnrecoverableError",
+        message: "AGENT_CHECKPOINT_INVALID",
+      }),
+    );
+    expect(harness.graph.invoke).not.toHaveBeenCalled();
+    expect(harness.runs.complete).not.toHaveBeenCalled();
   });
 
   it("Agent 返回其他 runId 时禁止保存检查点或完成任务", async () => {

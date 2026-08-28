@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   const runs = { kind: "runs" };
   const progress = { kind: "progress" };
   const cancellation = { kind: "cancellation" };
+  const checkpointer = { kind: "checkpointer" };
   const workflow = { kind: "workflow" };
   const budgets = {
     quick: {
@@ -38,6 +39,7 @@ const mocks = vi.hoisted(() => {
     runs,
     progress,
     cancellation,
+    checkpointer,
     workflow,
     budgets,
     ResearchBudgetsSchema: { parse: vi.fn((value) => value) },
@@ -50,6 +52,7 @@ const mocks = vi.hoisted(() => {
     createResearchGraph: vi.fn(() => graph),
     getWorkerDatabaseConnection: vi.fn(() => database),
     getWorkerRedis: vi.fn(() => redis),
+    getWorkerAgentCheckpointer: vi.fn(() => checkpointer),
     RunRepository: vi.fn(function MockRunRepository() {
       return runs;
     }),
@@ -85,6 +88,10 @@ vi.mock("./database", () => ({
 
 vi.mock("./redis", () => ({
   getWorkerRedis: mocks.getWorkerRedis,
+}));
+
+vi.mock("./checkpointer", () => ({
+  getWorkerAgentCheckpointer: mocks.getWorkerAgentCheckpointer,
 }));
 
 vi.mock("./progress-publisher", () => ({
@@ -128,6 +135,7 @@ describe("createAgentResearchWorkflow", () => {
     expect(() => createAgentResearchWorkflow()).toThrow(message);
     expect(mocks.getWorkerDatabaseConnection).not.toHaveBeenCalled();
     expect(mocks.getWorkerRedis).not.toHaveBeenCalled();
+    expect(mocks.getWorkerAgentCheckpointer).not.toHaveBeenCalled();
   });
 
   it("使用环境变量创建模型、搜索工具、Graph 和 Workflow", () => {
@@ -151,6 +159,7 @@ describe("createAgentResearchWorkflow", () => {
       model: mocks.model,
       researchTool: mocks.researchTool,
       budgets: mocks.budgets,
+      checkpointer: mocks.checkpointer,
       executionGuard: mocks.cancellation,
       operationTimeouts: {
         modelMs: 120_000,

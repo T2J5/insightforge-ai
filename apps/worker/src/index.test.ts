@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     closeWorkerRedis: vi.fn().mockResolvedValue(undefined),
     getWorkerDatabaseConnection: vi.fn(() => database),
     closeWorkerDatabaseConnection: vi.fn().mockResolvedValue(undefined),
+    closeWorkerAgentCheckpointer: vi.fn().mockResolvedValue(undefined),
     createResearchWorker: vi.fn(() => worker),
     WorkerRuntime: vi.fn(function MockWorkerRuntime() {
       return runtime;
@@ -77,6 +78,10 @@ vi.mock("./redis", () => ({
 vi.mock("./database", () => ({
   getWorkerDatabaseConnection: mocks.getWorkerDatabaseConnection,
   closeWorkerDatabaseConnection: mocks.closeWorkerDatabaseConnection,
+}));
+
+vi.mock("./checkpointer", () => ({
+  closeWorkerAgentCheckpointer: mocks.closeWorkerAgentCheckpointer,
 }));
 
 vi.mock("./research-worker", () => ({
@@ -124,6 +129,7 @@ describe("Worker entrypoint", () => {
       worker: mocks.worker,
       closeRedis: mocks.closeWorkerRedis,
       closeDatabase: mocks.closeWorkerDatabaseConnection,
+      closeCheckpointer: mocks.closeWorkerAgentCheckpointer,
     });
     expect(mocks.worker.on).toHaveBeenCalledWith(
       "failed",

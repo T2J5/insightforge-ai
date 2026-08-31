@@ -4,7 +4,11 @@
 >
 > 分支：`codex/add-cited-web-evidence`
 >
-> 状态：代码实现与质量门禁完成
+> 提交：`f94861d feat: collect cited web evidence`
+>
+> Pull Request：[#8](https://github.com/T2J5/insightforge-ai/pull/8)
+>
+> 状态：Task 5 已完成，等待 PR 合并
 
 ## 1. 阶段目标
 

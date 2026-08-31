@@ -20,6 +20,7 @@ const toEvidence = (row: typeof evidenceTable.$inferSelect): Evidence => {
     ownerId: row.ownerId,
     claim: row.claim,
     sourceType: row.sourceType,
+    sourceCategory: row.sourceCategory,
     sourceUrl: row.sourceUrl,
     sourceTitle: row.sourceTitle,
     publisher: row.publisher,
@@ -53,6 +54,7 @@ export class EvidenceRepository {
         ownerId: parsed.ownerId,
         claim: parsed.claim,
         sourceType: parsed.sourceType,
+        sourceCategory: parsed.sourceCategory,
         sourceUrl: parsed.sourceUrl,
         sourceTitle: parsed.sourceTitle,
         publisher: parsed.publisher,
@@ -88,6 +90,7 @@ export class EvidenceRepository {
         set: {
           claim: parsed.claim,
           sourceType: parsed.sourceType,
+          sourceCategory: parsed.sourceCategory,
           sourceUrl: parsed.sourceUrl,
           sourceTitle: parsed.sourceTitle,
           publisher: parsed.publisher,

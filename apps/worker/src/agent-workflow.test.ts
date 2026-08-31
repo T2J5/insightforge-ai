@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AgentResearchWorkflow,
   type AgentWorkflowCancellationGuard,
+  type AgentWorkflowEvidenceStore,
   type AgentWorkflowProgressPublisher,
   type AgentWorkflowRunStore,
   type ResearchAgentResult,
@@ -130,15 +131,20 @@ const createHarness = (run: ResearchRun | null = createRun()) => {
   const cancellation: AgentWorkflowCancellationGuard = {
     assertNotCancelled: vi.fn().mockResolvedValue(undefined),
   };
+  const evidenceStore: AgentWorkflowEvidenceStore = {
+    upsert: vi.fn(async (evidence) => evidence),
+  };
   const workflow = new AgentResearchWorkflow(
     runs,
     graph,
     progress,
     cancellation,
     budgets,
+    evidenceStore,
+    () => new Date("2026-08-25T00:04:30.000Z"),
   );
 
-  return { workflow, runs, graph, progress, cancellation };
+  return { workflow, runs, graph, progress, cancellation, evidenceStore };
 };
 
 describe("AgentResearchWorkflow", () => {
@@ -198,6 +204,17 @@ describe("AgentResearchWorkflow", () => {
         estimatedCostCny: 0.12,
       },
     });
+    expect(harness.evidenceStore.upsert).toHaveBeenCalledOnce();
+    expect(harness.evidenceStore.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId,
+        ownerId: "owner-1",
+        sourceType: "web",
+        sourceUrl: "https://example.com/openai",
+        sourceCategory: "unknown",
+        retrievedAt: new Date("2026-08-25T00:04:30.000Z"),
+      }),
+    );
     expect(harness.runs.complete).toHaveBeenCalledWith(runId, {
       tokenUsage: 120,
       estimatedCostCny: 0.12,
@@ -217,12 +234,30 @@ describe("AgentResearchWorkflow", () => {
 
     const saveOrder = vi.mocked(harness.runs.saveCheckpoint).mock
       .invocationCallOrder[0]!;
+    const evidenceOrder = vi.mocked(harness.evidenceStore.upsert).mock
+      .invocationCallOrder[0]!;
     const completeOrder = vi.mocked(harness.runs.complete).mock
       .invocationCallOrder[0]!;
     const completedProgressOrder = vi.mocked(harness.progress.publish).mock
       .invocationCallOrder[1]!;
+    expect(evidenceOrder).toBeLessThan(saveOrder);
     expect(saveOrder).toBeLessThan(completeOrder);
     expect(completeOrder).toBeLessThan(completedProgressOrder);
+  });
+
+  it("证据保存失败时不保存最终检查点或完成 Run", async () => {
+    const harness = createHarness();
+    vi.mocked(harness.evidenceStore.upsert).mockRejectedValueOnce(
+      new Error("EVIDENCE_DATABASE_UNAVAILABLE"),
+    );
+
+    await expect(harness.workflow.run(runId)).rejects.toThrow(
+      "EVIDENCE_DATABASE_UNAVAILABLE",
+    );
+
+    expect(harness.runs.saveCheckpoint).not.toHaveBeenCalled();
+    expect(harness.runs.complete).not.toHaveBeenCalled();
+    expect(harness.progress.publish).toHaveBeenCalledOnce();
   });
 
   it("deep 调研使用稳定的十五分钟期限", async () => {

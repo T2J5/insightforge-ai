@@ -24,6 +24,20 @@ export const EvidenceSourceTypeSchema = z.enum(["web", "document"]);
 
 export type EvidenceSourceType = z.infer<typeof EvidenceSourceTypeSchema>;
 
+/**
+ * 来源质量类别只描述来源身份，不代表其中的事实已经被验证。
+ */
+export const EvidenceSourceCategorySchema = z.enum([
+  "official",
+  "trusted_news",
+  "secondary",
+  "unknown",
+]);
+
+export type EvidenceSourceCategory = z.infer<
+  typeof EvidenceSourceCategorySchema
+>;
+
 export const validateEvidenceSourceConsistency = (
   evidence: {
     sourceType: "web" | "document";
@@ -75,6 +89,8 @@ export const EvidenceSchema = z
     claim: z.string().trim().min(1).max(4_000),
 
     sourceType: EvidenceSourceTypeSchema,
+
+    sourceCategory: EvidenceSourceCategorySchema.default("unknown"),
 
     /**
      * 文档证据可能没有公开URL，因此允许为空。

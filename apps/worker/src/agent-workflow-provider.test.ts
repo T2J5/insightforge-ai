@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => {
   const model = { kind: "model" };
   const webSearch = { kind: "web-search" };
   const contentExtractor = { kind: "content-extractor" };
+  const pageFetcher = { kind: "page-fetcher" };
   const researchTool = { kind: "research-tool" };
   const graph = { kind: "graph" };
   const database = { db: { kind: "database" } };
   const redis = { kind: "redis" };
   const runs = { kind: "runs" };
+  const evidenceStore = { kind: "evidence-store" };
   const progress = { kind: "progress" };
   const cancellation = { kind: "cancellation" };
   const checkpointer = { kind: "checkpointer" };
@@ -32,11 +34,13 @@ const mocks = vi.hoisted(() => {
     model,
     webSearch,
     contentExtractor,
+    pageFetcher,
     researchTool,
     graph,
     database,
     redis,
     runs,
+    evidenceStore,
     progress,
     cancellation,
     checkpointer,
@@ -45,7 +49,12 @@ const mocks = vi.hoisted(() => {
     ResearchBudgetsSchema: { parse: vi.fn((value) => value) },
     createOpenAiStructuredModel: vi.fn(() => model),
     createTavilyWebSearch: vi.fn(() => webSearch),
-    createTavilyContentExtractor: vi.fn(() => contentExtractor),
+    BoundedWebPageFetcher: vi.fn(function MockBoundedWebPageFetcher() {
+      return pageFetcher;
+    }),
+    BoundedContentExtractor: vi.fn(function MockBoundedContentExtractor() {
+      return contentExtractor;
+    }),
     WebResearchTool: vi.fn(function MockWebResearchTool() {
       return researchTool;
     }),
@@ -55,6 +64,9 @@ const mocks = vi.hoisted(() => {
     getWorkerAgentCheckpointer: vi.fn(() => checkpointer),
     RunRepository: vi.fn(function MockRunRepository() {
       return runs;
+    }),
+    EvidenceRepository: vi.fn(function MockEvidenceRepository() {
+      return evidenceStore;
     }),
     ProgressPublisher: vi.fn(function MockProgressPublisher() {
       return progress;
@@ -71,7 +83,8 @@ const mocks = vi.hoisted(() => {
 vi.mock("@insightforge/agent", () => ({
   createOpenAiStructuredModel: mocks.createOpenAiStructuredModel,
   createTavilyWebSearch: mocks.createTavilyWebSearch,
-  createTavilyContentExtractor: mocks.createTavilyContentExtractor,
+  BoundedWebPageFetcher: mocks.BoundedWebPageFetcher,
+  BoundedContentExtractor: mocks.BoundedContentExtractor,
   WebResearchTool: mocks.WebResearchTool,
   createResearchGraph: mocks.createResearchGraph,
   ResearchBudgetsSchema: mocks.ResearchBudgetsSchema,
@@ -80,6 +93,7 @@ vi.mock("@insightforge/agent", () => ({
 
 vi.mock("@insightforge/db", () => ({
   RunRepository: mocks.RunRepository,
+  EvidenceRepository: mocks.EvidenceRepository,
 }));
 
 vi.mock("./database", () => ({
@@ -155,6 +169,12 @@ describe("createAgentResearchWorkflow", () => {
       mocks.webSearch,
       mocks.contentExtractor,
     );
+    expect(mocks.BoundedWebPageFetcher).toHaveBeenCalledWith({
+      defaultTimeoutMs: 30_000,
+    });
+    expect(mocks.BoundedContentExtractor).toHaveBeenCalledWith(
+      mocks.pageFetcher,
+    );
     expect(mocks.createResearchGraph).toHaveBeenCalledWith({
       model: mocks.model,
       researchTool: mocks.researchTool,
@@ -172,6 +192,7 @@ describe("createAgentResearchWorkflow", () => {
       mocks.progress,
       mocks.cancellation,
       mocks.budgets,
+      mocks.evidenceStore,
     );
   });
 

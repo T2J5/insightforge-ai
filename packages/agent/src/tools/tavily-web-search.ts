@@ -10,6 +10,13 @@ import {
   type WebSearchInput,
   type WebSearchPort,
 } from "./web-search";
+import {
+  defaultSleep,
+  readHttpStatusFromError,
+  RetryableWebError,
+  retryWebOperation,
+  type Sleep,
+} from "./web-resilience";
 
 /**
  * 只声明当前适配器实际使用的 Tavily 能力。
@@ -19,6 +26,11 @@ import {
  */
 export type TavilySearchClient = Pick<TavilyClient, "search">;
 
+export interface TavilyWebSearchOptions {
+  maxAttempts?: number;
+  retryDelayMs?: number;
+  sleep?: Sleep;
+}
 /**
  * Tavily 返回的单条原始搜索结果。
  *
@@ -54,44 +66,71 @@ const TavilyRawSearchResponseSchema = z
  * 4. 转换成项目统一的 WebSearchHit。
  */
 export class TavilyWebSearch implements WebSearchPort {
-  constructor(private readonly client: TavilySearchClient) {}
+  private readonly maxAttempts: number;
+  private readonly retryDelayMs: number;
+  private readonly sleep: Sleep;
+  constructor(
+    private readonly client: TavilySearchClient,
+    options: TavilyWebSearchOptions = {},
+  ) {
+    this.maxAttempts = options.maxAttempts ?? 2;
+    this.retryDelayMs = options.retryDelayMs ?? 250;
+    this.sleep = options.sleep ?? defaultSleep;
+  }
 
   async search(untrustedInput: WebSearchInput): Promise<WebSearchHit[]> {
     const input = WebSearchInputSchema.parse(untrustedInput);
-    const response = await this.client.search(input.query, {
-      searchDepth: input.searchDepth,
-      topic: "general",
-      maxResults: input.maxResults,
-      ...(input.timeoutMs === undefined
-        ? {}
-        : {
-            timeout: Math.max(1, Math.ceil(input.timeoutMs / 1000)),
-          }),
-      /**
-       * 目前只使用搜索结果，不采用 Tavily 自动生成的答案。
-       *
-       * 最终结论应由我们自己的 writer 根据来源生成。
-       */
-      includeAnswer: false,
-      includeImages: false,
-      /**
-       * 当前阶段只需要搜索摘要。
-       *
-       * 后续 Evidence 阶段再单独抓取网页全文。
-       */
-      includeRawContent: false,
-      /**
-       * 禁止 Tavily 自动把 basic 升级为 advanced，
-       * 避免不可预测的 Credit 消耗。
-       */
-      autoParameters: false,
-      /**
-       * 请求返回 Credit 用量。
-       *
-       * 本阶段暂不保存，后续观测任务再接入 State。
-       */
-      includeUsage: true,
-    });
+    const timeoutMs = input.timeoutMs ?? 10_000;
+    const deadlineAt = Date.now() + timeoutMs;
+    const response = await retryWebOperation(
+      async () => {
+        try {
+          const remainingTimeoutMs = Math.max(1, deadlineAt - Date.now());
+          return await this.client.search(input.query, {
+            searchDepth: input.searchDepth,
+            topic: "general",
+            maxResults: input.maxResults,
+            ...(input.timeoutMs === undefined
+              ? {}
+              : {
+                  timeout: Math.max(1, Math.ceil(remainingTimeoutMs / 1000)),
+                }),
+            includeAnswer: false,
+            includeImages: false,
+            includeRawContent: false,
+            autoParameters: false,
+            includeUsage: true,
+          });
+        } catch (error) {
+          const status = readHttpStatusFromError(error);
+          if (status === 429) {
+            throw new RetryableWebError("SEARCH_RATE_LIMITED", {
+              cause: error,
+            });
+          }
+          if (
+            status === 408 ||
+            status === 500 ||
+            status === 502 ||
+            status === 503 ||
+            status === 504 ||
+            status === null
+          ) {
+            throw new RetryableWebError("SEARCH_UNAVAILABLE", { cause: error });
+          }
+
+          throw new Error("SEARCH_UNAVAILABLE", {
+            cause: error,
+          });
+        }
+      },
+      {
+        maxAttempts: this.maxAttempts,
+        retryDelayMs: this.retryDelayMs,
+        sleep: this.sleep,
+        deadlineAt,
+      },
+    );
     const parsedResponse = TavilyRawSearchResponseSchema.parse(response);
     const hits: WebSearchHit[] = [];
     for (const untrustedResult of parsedResponse.results) {

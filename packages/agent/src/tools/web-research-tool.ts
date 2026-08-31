@@ -15,6 +15,7 @@ import {
   type ContentExtractorPort,
 } from "./content-extractor";
 import z from "zod";
+import { canonicalizeWebUrl } from "./search-web";
 
 /**
  * 使用 Web Search 完成调研问题的工具。
@@ -108,19 +109,25 @@ export class WebResearchTool implements ResearchTool {
       throw new Error(`CONTENT_EXTRACTION_EMPTY`);
     }
 
-    const hitByUrl = new Map(hits.map((hit) => [hit.url, hit]));
+    const hitByUrl = new Map(
+      hits.map((hit) => [canonicalizeWebUrl(hit.url), hit]),
+    );
 
     const sources = extractedPages
       .flatMap((page) => {
-        const searchHit = hitByUrl.get(page.url);
+        const canonicalUrl = canonicalizeWebUrl(page.url);
+        const searchHit = hitByUrl.get(canonicalUrl);
         if (!searchHit) {
           return [];
         }
         return [
           {
             title: page.title ?? searchHit.title,
-            url: page.url,
+            url: canonicalUrl,
             snippet: page.content.slice(0, 1_200),
+            publisher: page.publisher,
+            publishedAt: page.publishedAt,
+            retrievedAt: page.fetchedAt,
           },
         ];
       })

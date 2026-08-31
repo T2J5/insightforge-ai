@@ -31,7 +31,10 @@ const createClient = (
 describe("TavilyContentExtractor", () => {
   it("deduplicates URLs, maps options, and normalizes extracted pages", async () => {
     const { client, extract } = createClient([validResult]);
-    const contentExtractor = new TavilyContentExtractor(client);
+    const contentExtractor = new TavilyContentExtractor(
+      client,
+      () => new Date("2026-08-31T08:00:00.000Z"),
+    );
 
     const result = await contentExtractor.extract({
       urls: [
@@ -55,6 +58,9 @@ describe("TavilyContentExtractor", () => {
       {
         url: "https://example.com/technology",
         title: "ByteDance Technology",
+        publisher: null,
+        publishedAt: null,
+        fetchedAt: "2026-08-31T08:00:00.000Z",
         content: "Extracted recommendation system content.",
       },
     ]);

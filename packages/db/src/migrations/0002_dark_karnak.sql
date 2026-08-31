@@ -1,0 +1,2 @@
+CREATE TYPE "public"."evidence_source_category" AS ENUM('official', 'trusted_news', 'secondary', 'unknown');--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "source_category" "evidence_source_category" DEFAULT 'unknown' NOT NULL;

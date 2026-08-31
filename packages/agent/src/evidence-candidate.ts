@@ -87,6 +87,9 @@ export const EvidenceCandidateSchema = z
     claim: z.string().trim().min(1).max(4_000),
     sourceUrl: z.url(),
     sourceTitle: z.string().trim().min(1).max(500),
+    publisher: z.string().trim().min(1).max(300).nullable().optional(),
+    publishedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+    retrievedAt: z.iso.datetime({ offset: true }).optional(),
     quote: z.string().trim().min(1).max(1_200),
     confidence: z.number().finite().min(0).max(1),
   })

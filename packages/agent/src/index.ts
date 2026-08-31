@@ -11,9 +11,15 @@ export * from "./tools/web-search";
 
 export * from "./tools/content-extractor";
 export * from "./tools/tavily-content-extractor";
+export * from "./tools/bounded-content-extractor";
 
 export * from "./evidence-extractor";
+export * from "./evidence-normalizer";
 export * from "./evidence-candidate";
+export * from "./source-quality";
 
 export * from "./report-citation";
 export * from "./budgets";
+export * from "./tools/search-web";
+export * from "./tools/fetch-web-page";
+export * from "./tools/web-resilience";

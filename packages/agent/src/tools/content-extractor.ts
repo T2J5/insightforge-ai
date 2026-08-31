@@ -48,6 +48,9 @@ export const ExtractedPageSchema = z
   .object({
     url: z.url(),
     title: z.string().trim().min(1).max(500).nullable(),
+    publisher: z.string().trim().min(1).max(300).nullable().optional(),
+    publishedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+    fetchedAt: z.iso.datetime({ offset: true }).optional(),
     /**
      * 这里保存的是与 query 相关的 Markdown 正文块。
      *

@@ -37,6 +37,9 @@ export const ResearchSourceSchema = z
     title: z.string().trim().min(1).max(500),
     url: z.url(),
     snippet: z.string().trim().min(1).max(4_000),
+    publisher: z.string().trim().min(1).max(300).nullable().optional(),
+    publishedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+    retrievedAt: z.iso.datetime({ offset: true }).optional(),
   })
   .strict();
 

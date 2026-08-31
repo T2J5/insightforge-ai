@@ -1,6 +1,7 @@
 import {
   createOpenAiStructuredModel,
-  createTavilyContentExtractor,
+  BoundedContentExtractor,
+  BoundedWebPageFetcher,
   createTavilyWebSearch,
   WebResearchTool,
   createResearchGraph,
@@ -10,7 +11,7 @@ import {
 import { AgentResearchWorkflow } from "./agent-workflow";
 import { getWorkerDatabaseConnection } from "./database";
 import { getWorkerRedis } from "./redis";
-import { RunRepository } from "@insightforge/db";
+import { EvidenceRepository, RunRepository } from "@insightforge/db";
 import { ProgressPublisher } from "./progress-publisher";
 import { CancellationGuard } from "./cancellation";
 import { getWorkerAgentCheckpointer } from "./checkpointer";
@@ -158,12 +159,17 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     ),
   });
   const webSearch = createTavilyWebSearch(searchApiKey);
-  const contentExtractor = createTavilyContentExtractor(searchApiKey);
+  const contentExtractor = new BoundedContentExtractor(
+    new BoundedWebPageFetcher({
+      defaultTimeoutMs: searchTimeoutMs,
+    }),
+  );
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
   const redis = getWorkerRedis();
   const database = getWorkerDatabaseConnection();
   const checkpointer = getWorkerAgentCheckpointer();
   const runs = new RunRepository(database.db);
+  const evidenceStore = new EvidenceRepository(database.db);
   const progress = new ProgressPublisher(redis);
   const cancellation = new CancellationGuard(redis);
 
@@ -185,5 +191,6 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     progress,
     cancellation,
     budgets,
+    evidenceStore,
   );
 };

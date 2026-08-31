@@ -58,6 +58,13 @@ export const evidenceSourceTypeEnum = pgEnum("evidence_source_type", [
   "document",
 ]);
 
+export const evidenceSourceCategoryEnum = pgEnum("evidence_source_category", [
+  "official",
+  "trusted_news",
+  "secondary",
+  "unknown",
+]);
+
 export const reportVersionStatusEnum = pgEnum("report_version_status", [
   "draft",
   "published",
@@ -266,6 +273,9 @@ export const evidence = pgTable(
       }),
     claim: text("claim").notNull(),
     sourceType: evidenceSourceTypeEnum("source_type").notNull(),
+    sourceCategory: evidenceSourceCategoryEnum("source_category")
+      .default("unknown")
+      .notNull(),
     sourceUrl: text("source_url"),
     sourceTitle: varchar("source_title", { length: 500 }),
     publisher: varchar("publisher", { length: 300 }),

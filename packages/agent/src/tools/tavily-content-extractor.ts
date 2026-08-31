@@ -24,7 +24,10 @@ const TavilyRawExtractResponseSchema = z
   })
   .passthrough();
 export class TavilyContentExtractor implements ContentExtractorPort {
-  constructor(private readonly client: TavilyExtractClient) {}
+  constructor(
+    private readonly client: TavilyExtractClient,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   async extract(
     untrustedInput: ContentExtractionInput,
@@ -89,6 +92,9 @@ export class TavilyContentExtractor implements ContentExtractorPort {
       const candidate = ExtractedPageSchema.safeParse({
         url,
         title: normalizedTitle,
+        publisher: null,
+        publishedAt: null,
+        fetchedAt: this.now().toISOString(),
         content: result.rawContent.trim().slice(0, 6_000),
       });
 

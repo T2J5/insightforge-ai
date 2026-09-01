@@ -65,6 +65,20 @@ export const evidenceSourceCategoryEnum = pgEnum("evidence_source_category", [
   "unknown",
 ]);
 
+export const documentTypeEnum = pgEnum("document_type", [
+  "pdf",
+  "docx",
+  "markdown",
+  "text",
+]);
+
+export const documentStatusEnum = pgEnum("document_status", [
+  "pending",
+  "processing",
+  "ready",
+  "failed",
+]);
+
 export const reportVersionStatusEnum = pgEnum("report_version_status", [
   "draft",
   "published",
@@ -186,10 +200,15 @@ export const documents = pgTable(
         onDelete: "cascade",
       }),
     title: varchar("title", { length: 500 }).notNull(),
+    originalName: varchar("original_name", { length: 500 }).notNull(),
+    documentType: documentTypeEnum("document_type").notNull(),
+    status: documentStatusEnum("status").default("pending").notNull(),
+    errorCode: varchar("error_code", { length: 80 }),
     sourceUrl: text("source_url"),
-    mimeType: varchar("mime_type", { length: 120 }),
+    mimeType: varchar("mime_type", { length: 120 }).notNull(),
+    fileSize: integer("file_size").notNull(),
     contentHash: varchar("content_hash", { length: 64 }).notNull(),
-    storageKey: text("storage_key"),
+    storageKey: text("storage_key").notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
@@ -200,11 +219,47 @@ export const documents = pgTable(
   (table) => [
     index("documents_run_id_idx").on(table.runId),
     index("documents_owner_id_idx").on(table.ownerId),
-    uniqueIndex("documents_run_hash_unique").on(table.runId, table.contentHash),
+    uniqueIndex("documents_owner_hash_unique").on(
+      table.ownerId,
+      table.contentHash,
+    ),
     check(
       "documents_content_hash_format",
       sql`${table.contentHash} ~ '^[A-Fa-f0-9]{64}$'`,
     ),
+    check("documents_file_size_positive", sql`${table.fileSize} > 0`),
+    check(
+      "documents_status_error_consistency",
+      sql`(${table.status} = 'failed' AND ${table.errorCode} IS NOT NULL) OR (${table.status} <> 'failed' AND ${table.errorCode} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * 文档实体按 owner + contentHash 复用；该关联表描述哪些 Run 可以使用它。
+ */
+export const runDocuments = pgTable(
+  "run_documents",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => researchRuns.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    ownerId: varchar("owner_id", { length: 128 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_documents_run_document_unique").on(
+      table.runId,
+      table.documentId,
+    ),
+    index("run_documents_owner_run_idx").on(table.ownerId, table.runId),
   ],
 );
 
@@ -245,6 +300,10 @@ export const documentChunks = pgTable(
     index("document_chunks_embedding_hnsw_idx").using(
       "hnsw",
       table.embedding.op("vector_cosine_ops"),
+    ),
+    index("document_chunks_content_fts_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${table.content})`,
     ),
     check(
       "document_chunks_token_count_nonnegative",

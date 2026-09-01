@@ -4,7 +4,11 @@
 >
 > 分支：`codex/add-private-document-rag`
 >
-> 状态：代码实现完成，等待提交 PR
+> 提交：`d0f4ae5 feat: add private document rag`
+>
+> Pull Request：[#9](https://github.com/T2J5/insightforge-ai/pull/9)
+>
+> 状态：Task 6 已完成，等待 PR 合并
 
 ## 1. 任务目标
 

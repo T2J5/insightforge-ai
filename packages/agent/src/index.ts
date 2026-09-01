@@ -23,3 +23,4 @@ export * from "./budgets";
 export * from "./tools/search-web";
 export * from "./tools/fetch-web-page";
 export * from "./tools/web-resilience";
+export * from "./tools/search-uploaded-documents";

@@ -22,6 +22,20 @@
       "when": 1788166043151,
       "tag": "0002_dark_karnak",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788170533521,
+      "tag": "0003_last_morbius",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788170931460,
+      "tag": "0004_curly_ultimates",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,27 @@
+{
+  "name": "@insightforge/retrieval",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "lint": "eslint src",
+    "test": "vitest run --root ../.. --project @insightforge/retrieval",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+  },
+  "dependencies": {
+    "@insightforge/db": "workspace:*",
+    "@insightforge/domain": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "mammoth": "1.12.2",
+    "pdfjs-dist": "6.3.289",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "dotenv": "17.4.2",
+    "vitest": "4.1.10"
+  }
+}

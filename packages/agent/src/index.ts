@@ -18,7 +18,8 @@ export * from "./evidence-normalizer";
 export * from "./evidence-candidate";
 export * from "./source-quality";
 
-export * from "./report-citation";
+export * from "./citations";
+export * from "./report-context";
 export * from "./budgets";
 export * from "./tools/search-web";
 export * from "./tools/fetch-web-page";

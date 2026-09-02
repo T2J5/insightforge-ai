@@ -1,4 +1,13 @@
-import type { StructuredModel } from "@insightforge/domain";
+import { createHash } from "node:crypto";
+
+import {
+  REQUIRED_REPORT_SECTION_KEYS,
+  type CreateReportVersion,
+  type Evidence,
+  type ReportReviewIssue,
+  type ReportVersion,
+  type StructuredModel,
+} from "@insightforge/domain";
 import {
   END,
   START,
@@ -21,7 +30,14 @@ import {
 } from "./tools/research-tool";
 
 import { extractEvidenceCandidates } from "./evidence-extractor";
-import { validateReportCitations } from "./report-citation";
+import { normalizeWebEvidence } from "./evidence-normalizer";
+import { buildReportEvidenceContext } from "./report-context";
+import {
+  validateCitedReport,
+  type CitedReportValidationResult,
+} from "./citations";
+import { buildWriteReportMessages } from "./prompts/write-report";
+import { buildReviewReportMessages } from "./prompts/review-report";
 import {
   assertWithinResearchBudget,
   DEFAULT_RESEARCH_BUDGETS,
@@ -37,6 +53,15 @@ export interface ResearchExecutionGuard {
   assertNotCancelled(runId: string): Promise<void>;
 }
 
+export interface ResearchEvidenceStore {
+  upsert(input: Evidence): Promise<Evidence>;
+  listForRun(runId: string): Promise<Evidence[]>;
+}
+
+export interface ResearchReportStore {
+  createVersion(input: CreateReportVersion): Promise<ReportVersion>;
+}
+
 /**
  * Agent 图需要的外部能力。
  *
@@ -50,6 +75,8 @@ export interface ResearchAgentGraphDependencies {
   model: StructuredModel;
   researchTool: ResearchTool;
   executionGuard: ResearchExecutionGuard;
+  evidenceStore: ResearchEvidenceStore;
+  reportStore: ResearchReportStore;
   /**
    * 可选的 LangGraph 状态持久化实现。
    *
@@ -78,6 +105,13 @@ export const afterReview = (
   }
   if (state.review.passed) return "publisher";
 
+  const hasCriticalIssue = state.review.issues.some(
+    (issue) => issue.severity === "critical",
+  );
+  if (hasCriticalIssue && state.revisionCount >= 1) {
+    throw new Error("REPORT_CITATION_SUPPORT_INVALID");
+  }
+
   /**
    * 最多修订一次。
    *
@@ -105,7 +139,7 @@ export const afterCitationValidation = (
   /**
    * 第一次引用错误允许 writer 修订。
    */
-  if (state.citationRevisionCount < 1) return "writer";
+  if (state.revisionCount < 1) return "writer";
   /**
    * 修订后引用仍不合法时停止工作流。
    *
@@ -114,6 +148,80 @@ export const afterCitationValidation = (
    */
   throw new Error("REPORT_CITATIONS_INVALID");
 };
+
+const createDeterministicUuid = (value: string): string => {
+  const bytes = createHash("sha256")
+    .update(value, "utf8")
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+};
+
+const citationValidationToIssues = (
+  validation: CitedReportValidationResult,
+): ReportReviewIssue[] => [
+  ...validation.unknownEvidenceIds.map((citationId) => ({
+    code: "UNKNOWN_EVIDENCE_ID",
+    severity: "critical" as const,
+    location: "citationIds",
+    message: "报告引用了不存在的证据。",
+    citationId,
+  })),
+  ...validation.crossRunEvidenceIds.map((citationId) => ({
+    code: "CROSS_RUN_EVIDENCE",
+    severity: "critical" as const,
+    location: "citationIds",
+    message: "报告引用了其他调研任务的证据。",
+    citationId,
+  })),
+  ...validation.crossOwnerEvidenceIds.map((citationId) => ({
+    code: "CROSS_OWNER_EVIDENCE",
+    severity: "critical" as const,
+    location: "citationIds",
+    message: "报告引用了其他用户的证据。",
+    citationId,
+  })),
+  ...validation.invalidSourceUrlEvidenceIds.map((citationId) => ({
+    code: "INVALID_EVIDENCE_URL",
+    severity: "critical" as const,
+    location: "citationIds",
+    message: "网页证据缺少有效的 HTTP(S) 来源地址。",
+    citationId,
+  })),
+  ...validation.duplicateCitationLocations.map((location) => ({
+    code: "DUPLICATE_CITATION",
+    severity: "error" as const,
+    location,
+    message: "同一内容块包含重复引用。",
+  })),
+  ...validation.duplicateSectionKeys.map((key) => ({
+    code: "DUPLICATE_SECTION",
+    severity: "error" as const,
+    location: `sections.${key}`,
+    message: "报告包含重复章节。",
+  })),
+  ...validation.uncitedFactLocations.map((location) => ({
+    code: "UNCITED_FACT",
+    severity: "critical" as const,
+    location,
+    message: "事实内容块没有当前任务的有效证据。",
+  })),
+  ...validation.missingSectionKeys.map((key) => ({
+    code: "MISSING_REQUIRED_SECTION",
+    severity: "error" as const,
+    location: `sections.${key}`,
+    message: "报告缺少必需章节。",
+  })),
+];
 
 /**
  * 把一次模型调用的用量转换成 State 增量。
@@ -137,6 +245,8 @@ export const createResearchGraph = ({
   model,
   researchTool,
   executionGuard,
+  evidenceStore,
+  reportStore,
   checkpointer,
   budgets: untrustedBudgets = DEFAULT_RESEARCH_BUDGETS,
   operationTimeouts:
@@ -329,6 +439,54 @@ export const createResearchGraph = ({
       ...formatUsage(result.usage),
     };
   };
+
+  /**
+   * evidencePersister：在 Writer 前把临时候选证据变成数据库中的正式 Evidence。
+   * Repository 返回值是权威结果，因为幂等冲突时数据库会保留原 Evidence ID。
+   */
+  const evidencePersister: typeof ResearchAgentState.Node = async (state) => {
+    await prepareOperation(state, "deterministic");
+    if (state.evidenceCandidates.length === 0) {
+      throw new Error("GROUNDED_EVIDENCE_REQUIRED");
+    }
+
+    if (state.evidence.length > 0) {
+      return { status: "writing", visitedNodes: "evidencePersister" };
+    }
+
+    for (const candidate of state.evidenceCandidates) {
+      const normalized = normalizeWebEvidence({
+        runId: state.runId,
+        ownerId: state.ownerId,
+        candidate,
+        publisher: candidate.publisher,
+        publishedAt: candidate.publishedAt,
+        retrievedAt: new Date(candidate.retrievedAt ?? state.startedAt),
+      });
+      const saved = await evidenceStore.upsert(normalized);
+      if (saved.runId !== state.runId || saved.ownerId !== state.ownerId) {
+        throw new Error("PERSISTED_EVIDENCE_IDENTITY_CONFLICT");
+      }
+    }
+
+    const persistedEvidence = await evidenceStore.listForRun(state.runId);
+    if (persistedEvidence.length === 0) {
+      throw new Error("PERSISTED_EVIDENCE_REQUIRED");
+    }
+    if (
+      persistedEvidence.some(
+        (item) => item.runId !== state.runId || item.ownerId !== state.ownerId,
+      )
+    ) {
+      throw new Error("PERSISTED_EVIDENCE_IDENTITY_CONFLICT");
+    }
+
+    return {
+      evidence: persistedEvidence,
+      status: "writing",
+      visitedNodes: "evidencePersister",
+    };
+  };
   /**
    * writer：第一次撰写或根据评审意见修订。
    */
@@ -337,59 +495,58 @@ export const createResearchGraph = ({
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
     }
-    if (state.findings.length === 0) {
-      throw new Error("RESEARCH_FINDINGS_REQUIRED");
-    }
-    if (state.evidenceCandidates.length === 0) {
+    if (state.evidence.length === 0) {
       throw new Error("GROUNDED_EVIDENCE_REQUIRED");
     }
 
     const isReviewRevision = state.review !== null && !state.review.passed;
     const isCitationRevision = state.citationIssues.length > 0;
     const isRevision = isReviewRevision || isCitationRevision;
-    const revisionIssues = [
+    if (isRevision && state.revisionCount >= 1) {
+      throw new Error("REPORT_REVISION_LIMIT_EXCEEDED");
+    }
+    const revisionIssues: ReportReviewIssue[] = [
       ...(isReviewRevision ? (state.review?.issues ?? []) : []),
-      ...state.citationIssues.map(
-        (issue) => `${issue.location}: ${issue.message}`,
-      ),
+      ...state.citationIssues,
     ];
+    const evidenceContext = buildReportEvidenceContext({
+      evidence: state.evidence,
+      runId: state.runId,
+      ownerId: state.ownerId,
+      maxEvidence: state.depth === "quick" ? 12 : 20,
+      maxCharacters: state.depth === "quick" ? 18_000 : 30_000,
+    });
+    if (evidenceContext.length === 0) {
+      throw new Error("REPORT_EVIDENCE_CONTEXT_EMPTY");
+    }
 
     const result = await model.generate(ReportDraftSchema, {
       operation: isRevision ? "revise-report" : "write-report",
       timeoutMs,
-      messages: [
-        {
-          role: "system",
-          content: isRevision
-            ? "你是企业调研报告修订助手。" +
-              "请根据修订问题和已验证证据修订报告。" +
-              "所有事实性结论只能来自 evidenceCandidates。" +
-              "executiveSummaryEvidenceIds 必须声明执行摘要使用的证据 ID。" +
-              "每个 section 的 evidenceIds 必须声明该章节使用的证据 ID。" +
-              "只能使用 evidenceCandidates 中存在的 evidenceId。" +
-              "不要为了满足引用要求而添加证据无法支持的事实。"
-            : "你是企业调研报告撰写助手。" +
-              "请根据调研计划和已验证证据生成结构化报告。" +
-              "所有事实性结论只能来自 evidenceCandidates。" +
-              "executiveSummaryEvidenceIds 必须声明执行摘要使用的证据 ID。" +
-              "每个 section 的 evidenceIds 必须声明该章节使用的证据 ID。" +
-              "只能使用 evidenceCandidates 中存在的 evidenceId。" +
-              "如果证据不足，请缩小结论范围，不得编造事实或证据 ID。",
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            company: state.company,
-            focus: state.focus,
-            depth: state.depth,
-            plan: state.plan,
-            evidenceCandidates: state.evidenceCandidates,
-            previousDraft: isRevision ? state.draft : null,
-            revisionIssues,
-          }),
-        },
-      ],
+      messages: buildWriteReportMessages({
+        company: state.company,
+        focus: state.focus,
+        depth: state.depth,
+        plan: state.plan,
+        evidence: evidenceContext,
+        previousDraft: isRevision ? state.draft : null,
+        revisionIssues,
+      }),
     });
+
+    const nextRevisionCount = isRevision ? state.revisionCount + 1 : 0;
+    await reportStore.createVersion({
+      id: createDeterministicUuid(
+        `${state.reportId}:draft:${nextRevisionCount}`,
+      ),
+      reportId: state.reportId,
+      runId: state.runId,
+      ownerId: state.ownerId,
+      content: result.value,
+      status: "draft",
+      qualityWarning: null,
+    });
+
     return {
       draft: result.value,
       review: null, // 修订后需要重新评审
@@ -398,8 +555,7 @@ export const createResearchGraph = ({
        * 下一节点重新验证新报告。
        */
       citationIssues: [],
-      revisionCount: isReviewRevision ? 1 : 0,
-      citationRevisionCount: isCitationRevision ? 1 : 0,
+      revisionCount: isRevision ? 1 : 0,
       status: "validating_citations",
       visitedNodes: "writer",
       ...formatUsage(result.usage),
@@ -418,17 +574,20 @@ export const createResearchGraph = ({
     await prepareOperation(state, "deterministic");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
 
-    if (state.evidenceCandidates.length === 0) {
+    if (state.evidence.length === 0) {
       throw new Error("GROUNDED_EVIDENCE_REQUIRED");
     }
-    const validation = validateReportCitations(
-      state.draft,
-      state.evidenceCandidates,
-    );
+    const validation = validateCitedReport({
+      draft: state.draft,
+      evidence: state.evidence,
+      expectedRunId: state.runId,
+      expectedOwnerId: state.ownerId,
+    });
+    const issues = citationValidationToIssues(validation);
 
     return {
-      citationIssues: validation.issues,
-      status: validation.valid ? "reviewing" : "writing",
+      citationIssues: issues,
+      status: validation.publishable ? "reviewing" : "writing",
       visitedNodes: "citationValidator",
     };
   };
@@ -441,40 +600,54 @@ export const createResearchGraph = ({
     if (state.citationIssues.length > 0) {
       throw new Error("REPORT_CITATIONS_INVALID");
     }
-    if (state.evidenceCandidates.length === 0) {
+    if (state.evidence.length === 0) {
       throw new Error("GROUNDED_EVIDENCE_REQUIRED");
     }
     if (!state.plan) throw new Error("RESEARCH_PLAN_REQUIRED");
-    if (state.findings.length === 0)
-      throw new Error("RESEARCH_FINDINGS_REQUIRED");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
+
+    const deterministic = validateCitedReport({
+      draft: state.draft,
+      evidence: state.evidence,
+      expectedRunId: state.runId,
+      expectedOwnerId: state.ownerId,
+    });
+    if (!deterministic.publishable) {
+      throw new Error("REPORT_CITATIONS_INVALID");
+    }
+    const evidenceContext = buildReportEvidenceContext({
+      evidence: state.evidence,
+      runId: state.runId,
+      ownerId: state.ownerId,
+    });
 
     const result = await model.generate(ReviewResultSchema, {
       operation: "review-report",
       timeoutMs,
-      messages: [
-        {
-          role: "system",
-          content:
-            "你是企业调研报告评审助手。" +
-            "当前报告已经通过确定性 Evidence ID 校验。" +
-            "请继续检查每个事实性结论是否真的得到对应 evidenceCandidates 支持，" +
-            "报告是否覆盖调研计划，" +
-            "以及是否存在夸大、推断过度或遗漏重要限制。" +
-            "证据不足时必须降低评分并说明具体问题。",
+      messages: buildReviewReportMessages({
+        plan: state.plan,
+        evidence: evidenceContext,
+        draft: state.draft,
+        deterministicMetrics: {
+          sectionCompleteness:
+            (REQUIRED_REPORT_SECTION_KEYS.length -
+              deterministic.missingSectionKeys.length) /
+            REQUIRED_REPORT_SECTION_KEYS.length,
+          citationCoverage: deterministic.citationCoverage,
         },
-        {
-          role: "user",
-          content: JSON.stringify({
-            plan: state.plan,
-            evidenceCandidates: state.evidenceCandidates,
-            draft: state.draft,
-          }),
-        },
-      ],
+      }),
     });
+    const hasCriticalIssue = result.value.issues.some(
+      (issue) => issue.severity === "critical",
+    );
+    const review = {
+      ...result.value,
+      sectionCompleteness: 1,
+      citationCoverage: deterministic.citationCoverage,
+      passed: result.value.score >= 80 && !hasCriticalIssue,
+    };
     return {
-      review: result.value,
+      review,
       status: "reviewing",
       visitedNodes: "reviewer",
       ...formatUsage(result.usage),
@@ -492,26 +665,67 @@ export const createResearchGraph = ({
 
     if (!state.review) throw new Error("REVIEW_RESULT_REQUIRED");
 
-    if (state.evidenceCandidates.length === 0) {
+    if (state.evidence.length === 0) {
       throw new Error("GROUNDED_EVIDENCE_REQUIRED");
     }
 
-    const citationValidation = validateReportCitations(
-      state.draft,
-      state.evidenceCandidates,
-    );
-    if (!citationValidation.valid) {
+    const citationValidation = validateCitedReport({
+      draft: state.draft,
+      evidence: state.evidence,
+      expectedRunId: state.runId,
+      expectedOwnerId: state.ownerId,
+    });
+    if (!citationValidation.publishable) {
       throw new Error("REPORT_CITATIONS_INVALID");
     }
+
+    const qualityWarning = state.review.passed
+      ? null
+      : "报告在一次修订后仍未完全通过质量评审，请人工复核未解决问题。";
+    const unresolvedIssues =
+      state.review.issues.length > 0
+        ? state.review.issues
+        : [
+            {
+              code: "QUALITY_THRESHOLD_NOT_MET",
+              severity: "warning" as const,
+              location: "report",
+              message: `评审得分 ${state.review.score}，未达到 80 分发布质量线。`,
+            },
+          ];
+    const publishedReport = state.review.passed
+      ? state.draft
+      : {
+          ...state.draft,
+          sections: [
+            ...state.draft.sections.filter(
+              (section) => section.key !== "unresolved_issues",
+            ),
+            {
+              key: "unresolved_issues" as const,
+              heading: "未解决问题",
+              blocks: unresolvedIssues.map((issue) => ({
+                markdown: `${issue.location}：${issue.message}`,
+                claimType: "summary" as const,
+                citationIds: issue.citationId ? [issue.citationId] : [],
+              })),
+            },
+          ],
+        };
+    await reportStore.createVersion({
+      id: createDeterministicUuid(
+        `${state.reportId}:published:${state.revisionCount}`,
+      ),
+      reportId: state.reportId,
+      runId: state.runId,
+      ownerId: state.ownerId,
+      content: publishedReport,
+      status: "published",
+      qualityWarning,
+    });
     return {
-      publishedReport: state.draft,
-      /**
-       * 一次修订后仍未通过评审时，
-       * 允许输出结果，但必须附带质量警告。
-       */
-      qualityWarning: state.review.passed
-        ? null
-        : "报告在一次修订后仍未通过评审，" + "请结合评审问题进行人工复核。",
+      publishedReport,
+      qualityWarning,
       status: "completed",
       visitedNodes: "publisher",
     };
@@ -521,6 +735,7 @@ export const createResearchGraph = ({
     .addNode("planner", planner)
     .addNode("researcher", researcher)
     .addNode("evidenceExtractor", evidenceExtractor)
+    .addNode("evidencePersister", evidencePersister)
     .addNode("citationValidator", citationValidator)
     .addNode("writer", writer)
     .addNode("reviewer", reviewer)
@@ -529,7 +744,8 @@ export const createResearchGraph = ({
     .addEdge(START, "planner")
     .addEdge("planner", "researcher")
     .addEdge("researcher", "evidenceExtractor")
-    .addEdge("evidenceExtractor", "writer")
+    .addEdge("evidenceExtractor", "evidencePersister")
+    .addEdge("evidencePersister", "writer")
     .addEdge("writer", "citationValidator")
     .addConditionalEdges("citationValidator", afterCitationValidation, {
       writer: "writer",

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   CreateReportVersionSchema,
+  REQUIRED_REPORT_SECTION_KEYS,
+  type CitedReportDraft,
   type CreateReportVersion,
 } from "@insightforge/domain";
 import { config } from "dotenv";
@@ -45,6 +47,18 @@ const testOwnerId = "report-repository-test-user";
 
 const testOwnerEmail = "report-repository-test@example.com";
 
+const createContent = (title: string): CitedReportDraft => ({
+  title,
+  executiveSummary: [
+    { markdown: "Summary", claimType: "summary", citationIds: [] },
+  ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [{ markdown: key, claimType: "summary", citationIds: [] }],
+  })),
+});
+
 /**
  * 创建属于 ReportRepository 测试用户的调研任务。
  */
@@ -69,11 +83,7 @@ const createReportInput = (
     reportId,
     runId,
     ownerId: testOwnerId,
-    content: {
-      title: "ByteDance Research Report",
-      summary: "Initial report draft",
-      sections: [],
-    },
+    content: createContent("ByteDance Research Report"),
     status: "draft",
     qualityWarning: null,
     ...overrides,
@@ -146,19 +156,13 @@ describe.sequential("ReportRepository", () => {
 
     const first = await reportRepository.createVersion(
       createReportInput(reportId, run.id, {
-        content: {
-          title: "Version One",
-          sections: [],
-        },
+        content: createContent("Version One"),
       }),
     );
 
     const second = await reportRepository.createVersion(
       createReportInput(reportId, run.id, {
-        content: {
-          title: "Version Two",
-          sections: [],
-        },
+        content: createContent("Version Two"),
       }),
     );
 
@@ -174,15 +178,36 @@ describe.sequential("ReportRepository", () => {
 
     expect(storedVersions).toHaveLength(2);
 
-    expect(storedVersions[0]?.content).toEqual({
-      title: "Version One",
-      sections: [],
+    expect(storedVersions[0]?.content).toEqual(createContent("Version One"));
+
+    expect(storedVersions[1]?.content).toEqual(createContent("Version Two"));
+  });
+
+  it("相同确定性版本 ID 重放时幂等返回，内容变化时拒绝覆盖", async () => {
+    const run = await createTestRun();
+    const reportId = randomUUID();
+    const versionId = randomUUID();
+    const input = createReportInput(reportId, run.id, {
+      id: versionId,
+      content: createContent("Stable Draft"),
     });
 
-    expect(storedVersions[1]?.content).toEqual({
-      title: "Version Two",
-      sections: [],
-    });
+    const first = await reportRepository.createVersion(input);
+    const replayed = await reportRepository.createVersion(input);
+
+    expect(replayed).toEqual(first);
+    await expect(
+      reportRepository.createVersion({
+        ...input,
+        content: createContent("Mutated Draft"),
+      }),
+    ).rejects.toThrow("REPORT_VERSION_IDEMPOTENCY_CONFLICT");
+
+    const rows = await connection.db
+      .select()
+      .from(reportVersions)
+      .where(eq(reportVersions.reportId, reportId));
+    expect(rows).toHaveLength(1);
   });
 
   it("allocates unique versions for concurrent requests", async () => {
@@ -193,16 +218,12 @@ describe.sequential("ReportRepository", () => {
     const [first, second] = await Promise.all([
       reportRepository.createVersion(
         createReportInput(reportId, run.id, {
-          content: {
-            title: "Concurrent Version A",
-          },
+          content: createContent("Concurrent Version A"),
         }),
       ),
       reportRepository.createVersion(
         createReportInput(reportId, run.id, {
-          content: {
-            title: "Concurrent Version B",
-          },
+          content: createContent("Concurrent Version B"),
         }),
       ),
     ]);
@@ -245,27 +266,21 @@ describe.sequential("ReportRepository", () => {
     const firstPublished = await reportRepository.createVersion(
       createReportInput(reportId, run.id, {
         status: "published",
-        content: {
-          title: "First Published Report",
-        },
+        content: createContent("First Published Report"),
       }),
     );
 
     const secondPublished = await reportRepository.createVersion(
       createReportInput(reportId, run.id, {
         status: "published",
-        content: {
-          title: "Second Published Report",
-        },
+        content: createContent("Second Published Report"),
       }),
     );
 
     await reportRepository.createVersion(
       createReportInput(reportId, run.id, {
         status: "draft",
-        content: {
-          title: "Unpublished New Draft",
-        },
+        content: createContent("Unpublished New Draft"),
       }),
     );
 
@@ -282,9 +297,7 @@ describe.sequential("ReportRepository", () => {
       reportId,
       version: 2,
       status: "published",
-      content: {
-        title: "Second Published Report",
-      },
+      content: createContent("Second Published Report"),
     });
   });
 

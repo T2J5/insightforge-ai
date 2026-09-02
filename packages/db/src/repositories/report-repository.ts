@@ -9,6 +9,17 @@ import type { Database } from "../client";
 
 import { eq, and, desc, or } from "drizzle-orm";
 
+const hasSameImmutableContent = (
+  existing: ReportVersion,
+  requested: CreateReportVersion,
+): boolean =>
+  existing.reportId === requested.reportId &&
+  existing.runId === requested.runId &&
+  existing.ownerId === requested.ownerId &&
+  existing.status === requested.status &&
+  existing.qualityWarning === requested.qualityWarning &&
+  JSON.stringify(existing.content) === JSON.stringify(requested.content);
+
 /**
  * 将 report_versions 数据库记录转换为
  * Domain ReportVersion。
@@ -107,6 +118,29 @@ export class ReportRepository {
        */
       if (report.runId !== parsed.runId || report.ownerId !== parsed.ownerId) {
         throw new Error("REPORT_IDENTITY_CONFLICT");
+      }
+
+      /**
+       * Agent 节点可能在“版本已写入、LangGraph Checkpoint 尚未提交”时退出。
+       * 恢复后会使用相同的确定性版本 ID 重放写入。
+       *
+       * 相同 ID + 相同不可变内容：视为幂等成功。
+       * 相同 ID + 不同内容：说明调用方试图覆盖历史版本，必须拒绝。
+       */
+      if (parsed.id) {
+        const [existingRow] = await transaction
+          .select()
+          .from(reportVersions)
+          .where(eq(reportVersions.id, parsed.id))
+          .limit(1);
+
+        if (existingRow) {
+          const existing = toReportVersion(existingRow);
+          if (!hasSameImmutableContent(existing, parsed)) {
+            throw new Error("REPORT_VERSION_IDEMPOTENCY_CONFLICT");
+          }
+          return existing;
+        }
       }
 
       /**

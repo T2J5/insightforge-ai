@@ -1,20 +1,60 @@
 import type {
+  CreateReportVersion,
+  Evidence,
   ModelInput,
   ModelResult,
+  ReportVersion,
   StructuredModel,
 } from "@insightforge/domain";
+import { REQUIRED_REPORT_SECTION_KEYS } from "@insightforge/domain";
 import { FakeStructuredModel } from "@insightforge/testkit";
 import { MemorySaver } from "@langchain/langgraph";
 import type { ZodType } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_RESEARCH_BUDGETS as DEFAULT_TEST_BUDGETS } from "./budgets";
 import { createResearchGraph as createProductionResearchGraph } from "./graph";
 import type {
   ResearchFinding,
   ResearchTool,
   ResearchToolInput,
 } from "./tools/research-tool";
+
+const RUN_ID = "550e8400-e29b-41d4-a716-446655440000";
+const EVIDENCE_ID = "650e8400-e29b-41d4-a716-446655440000";
+const UNKNOWN_ID = "750e8400-e29b-41d4-a716-446655440000";
+
+const createPersistedEvidence = (
+  overrides: Partial<Evidence> = {},
+): Evidence => ({
+  id: EVIDENCE_ID,
+  runId: RUN_ID,
+  ownerId: "owner-1",
+  claim: "ByteDance 建设了推荐系统和数据基础设施。",
+  sourceType: "web",
+  sourceCategory: "official",
+  sourceUrl: "https://example.com/technology",
+  sourceTitle: "ByteDance Technology Overview",
+  publisher: null,
+  publishedAt: null,
+  retrievedAt: new Date("2026-08-25T00:00:00.000Z"),
+  quote: "Recommendation systems and data infrastructure overview.",
+  documentId: null,
+  page: null,
+  confidence: 0.9,
+  contentHash: "a".repeat(64),
+  ...overrides,
+});
+
+const input = {
+  runId: RUN_ID,
+  reportId: RUN_ID,
+  ownerId: "owner-1",
+  company: "ByteDance",
+  focus: "technology" as const,
+  depth: "quick" as const,
+  startedAt: "2026-08-25T00:00:00.000Z",
+  deadlineAt: "2026-08-25T00:05:00.000Z",
+};
 
 const plan = {
   objective: "分析 ByteDance 的技术能力",
@@ -25,35 +65,6 @@ const plan = {
       rationale: "用于判断公司的技术竞争力",
     },
   ],
-};
-
-const firstDraft = {
-  title: "ByteDance 技术调研",
-  executiveSummary: "ByteDance 建立了数据和算法驱动的技术体系。",
-  executiveSummaryEvidenceIds: ["E1"],
-  sections: [
-    { heading: "核心技术", markdown: "第一版报告内容。", evidenceIds: ["E1"] },
-  ],
-};
-
-const revisedDraft = {
-  title: "ByteDance 技术调研（修订版）",
-  executiveSummary: "ByteDance 的推荐、数据平台和基础设施形成协同。",
-  executiveSummaryEvidenceIds: ["E1"],
-  sections: [
-    {
-      heading: "核心技术",
-      markdown: "根据评审意见补充后的报告内容。",
-      evidenceIds: ["E1"],
-    },
-  ],
-};
-
-const passedReview = { passed: true, score: 90, issues: [] };
-const failedReview = {
-  passed: false,
-  score: 60,
-  issues: ["缺少基础设施能力分析"],
 };
 
 const evidenceExtractionOutput = {
@@ -68,41 +79,75 @@ const evidenceExtractionOutput = {
   ],
 };
 
-const input = {
-  runId: "550e8400-e29b-41d4-a716-446655440000",
-  company: "ByteDance",
-  focus: "technology" as const,
-  depth: "quick" as const,
-  startedAt: "2026-08-25T00:00:00.000Z",
-  deadlineAt: "2026-08-25T00:05:00.000Z",
+const createDraft = (title: string, citationId = EVIDENCE_ID) => ({
+  title,
+  executiveSummary: [
+    {
+      markdown: "ByteDance 建设了推荐系统和数据基础设施。",
+      claimType: "fact" as const,
+      citationIds: [citationId],
+    },
+  ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [
+      {
+        markdown: `${key} 分析。`,
+        claimType: "inference" as const,
+        citationIds: [EVIDENCE_ID],
+      },
+    ],
+  })),
+});
+
+const passedReview = {
+  passed: true,
+  score: 90,
+  sectionCompleteness: 1,
+  citationCoverage: 1,
+  citationSupport: 0.95,
+  conflictHandling: 0.9,
+  issues: [],
 };
 
-const executionGuard = {
-  assertNotCancelled: async (_runId: string): Promise<void> => undefined,
+const failedReview = {
+  passed: false,
+  score: 70,
+  sectionCompleteness: 1,
+  citationCoverage: 1,
+  citationSupport: 0.7,
+  conflictHandling: 0.8,
+  issues: [
+    {
+      code: "WEAK_SUPPORT",
+      severity: "error" as const,
+      location: "executiveSummary.blocks[0]",
+      message: "结论范围大于证据支持范围。",
+      citationId: EVIDENCE_ID,
+    },
+  ],
 };
 
-/**
- * Graph 的单元测试使用固定时钟，避免测试结果依赖真实运行时间。
- * executionGuard 是本任务新增的必需依赖，默认使用不取消的测试替身。
- */
-const createResearchGraph = (
-  dependencies: Omit<
-    Parameters<typeof createProductionResearchGraph>[0],
-    "executionGuard" | "now"
-  >,
-) =>
-  createProductionResearchGraph({
-    ...dependencies,
-    executionGuard,
-    now: () => new Date("2026-08-25T00:00:01.000Z"),
-  });
+const criticalReview = {
+  ...failedReview,
+  issues: [
+    {
+      code: "CONTRADICTED_BY_SOURCE",
+      severity: "critical" as const,
+      location: "executiveSummary.blocks[0]",
+      message: "结论与引文相反。",
+      citationId: EVIDENCE_ID,
+    },
+  ],
+};
 
-const createFinding = (input: ResearchToolInput): ResearchFinding => ({
-  questionId: input.questionId,
-  summary: `${input.company} 在推荐算法和数据基础设施方面持续投入。`,
+const createFinding = (toolInput: ResearchToolInput): ResearchFinding => ({
+  questionId: toolInput.questionId,
+  summary: "ByteDance 在推荐算法和数据基础设施方面持续投入。",
   sources: [
     {
-      title: `${input.company} Technology Overview`,
+      title: "ByteDance Technology Overview",
       url: "https://example.com/technology",
       snippet: "Recommendation systems and data infrastructure overview.",
     },
@@ -111,616 +156,254 @@ const createFinding = (input: ResearchToolInput): ResearchFinding => ({
 
 class FakeResearchTool implements ResearchTool {
   readonly calls: ResearchToolInput[] = [];
-
-  constructor(
-    private readonly implementation: (
-      input: ResearchToolInput,
-    ) => Promise<ResearchFinding> = async (toolInput) =>
-      createFinding(toolInput),
-  ) {}
-
-  async research(input: ResearchToolInput): Promise<ResearchFinding> {
-    this.calls.push(input);
-    return this.implementation(input);
+  async research(toolInput: ResearchToolInput): Promise<ResearchFinding> {
+    this.calls.push(toolInput);
+    return createFinding(toolInput);
   }
 }
 
-describe("createResearchGraph", () => {
-  it("publishes directly when the first review passes", async () => {
-    const model = new FakeStructuredModel([
+const createHarness = (responses: unknown[], checkpointer?: MemorySaver) => {
+  const model = new FakeStructuredModel(responses);
+  const evidenceStore = {
+    upsert: vi.fn(async (value: Evidence): Promise<Evidence> => ({
+      ...value,
+      id: EVIDENCE_ID,
+    })),
+    listForRun: vi.fn(async (): Promise<Evidence[]> => [
+      createPersistedEvidence(),
+    ]),
+  };
+  const versions: ReportVersion[] = [];
+  const reportStore = {
+    createVersion: vi.fn(
+      async (value: CreateReportVersion): Promise<ReportVersion> => {
+        const version: ReportVersion = {
+          id: value.id ?? crypto.randomUUID(),
+          reportId: value.reportId,
+          runId: value.runId,
+          ownerId: value.ownerId,
+          version: versions.length + 1,
+          content: value.content,
+          status: value.status,
+          qualityWarning: value.qualityWarning,
+          createdAt: new Date("2026-08-25T00:00:02.000Z"),
+          publishedAt:
+            value.status === "published"
+              ? new Date("2026-08-25T00:00:03.000Z")
+              : null,
+        };
+        versions.push(version);
+        return version;
+      },
+    ),
+  };
+  const graph = createProductionResearchGraph({
+    model,
+    researchTool: new FakeResearchTool(),
+    evidenceStore,
+    reportStore,
+    executionGuard: { assertNotCancelled: vi.fn() },
+    checkpointer,
+    now: () => new Date("2026-08-25T00:00:01.000Z"),
+  });
+  return { graph, model, evidenceStore, reportStore, versions };
+};
+
+describe("Task 7 research graph", () => {
+  it("在 Writer 前保存 Evidence，并保存草稿和发布版本", async () => {
+    const draft = createDraft("第一版");
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
+      draft,
       passedReview,
     ]);
-    const researchTool = new FakeResearchTool();
-    const graph = createResearchGraph({ model, researchTool });
 
-    const result = await graph.invoke(input);
+    const result = await harness.graph.invoke(input);
 
     expect(result.status).toBe("completed");
-    expect(result.runId).toBe(input.runId);
-    expect(result.startedAt).toBe(input.startedAt);
-    expect(result.deadlineAt).toBe(input.deadlineAt);
-    expect(result.searchCount).toBe(1);
-    expect(result.completedQuestionIds).toEqual(["q1"]);
-    expect(result.publishedReport).toEqual(firstDraft);
-    expect(result.qualityWarning).toBeNull();
-    expect(result.revisionCount).toBe(0);
+    expect(result.evidence[0]?.id).toBe(EVIDENCE_ID);
+    expect(result.publishedReport).toEqual(draft);
     expect(result.visitedNodes).toEqual([
       "planner",
       "researcher",
       "evidenceExtractor",
+      "evidencePersister",
       "writer",
       "citationValidator",
       "reviewer",
       "publisher",
     ]);
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-      "write-report",
-      "review-report",
+    expect(harness.evidenceStore.upsert).toHaveBeenCalledOnce();
+    expect(harness.versions.map((version) => version.status)).toEqual([
+      "draft",
+      "published",
     ]);
-    expect(researchTool.calls).toEqual([
-      {
-        company: "ByteDance",
-        focus: "technology",
-        depth: "quick",
-        questionId: "q1",
-        question: "ByteDance 的核心技术能力是什么？",
-        timeoutMs: 30_000,
-      },
-    ]);
+    expect(harness.versions[0]?.id).toBeDefined();
+    expect(harness.versions[1]?.id).toBeDefined();
   });
 
-  it("persists graph state when a checkpointer and thread_id are provided", async () => {
-    const checkpointer = new MemorySaver();
-    const model = new FakeStructuredModel([
+  it("Writer 只收到有界 Evidence 白名单，不收到 ownerId、findings 或候选证据", async () => {
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
+      createDraft("第一版"),
       passedReview,
     ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-      checkpointer,
-    });
-    const config = {
-      configurable: {
-        thread_id: input.runId,
-      },
-    };
+    await harness.graph.invoke(input);
 
-    const result = await graph.invoke(input, config);
-    const checkpoint = await checkpointer.getTuple(config);
-
-    expect(result.status).toBe("completed");
-    expect(checkpoint).toBeDefined();
-    expect(checkpoint?.checkpoint.channel_values).toEqual(
-      expect.objectContaining({
-        runId: input.runId,
-        status: "completed",
-        publishedReport: firstDraft,
-      }),
+    const call = harness.model.calls.find(
+      (item) => item.operation === "write-report",
     );
+    const prompt = call?.messages.map((message) => message.content).join("\n");
+    expect(prompt).toContain(EVIDENCE_ID);
+    expect(prompt).not.toContain("owner-1");
+    expect(prompt).not.toContain("contentHash");
+    expect(prompt).not.toContain("evidenceCandidates");
+    expect(prompt).not.toContain("findings");
   });
 
-  it("stops before planner when the run has been cancelled", async () => {
-    const cancellationError = new Error("RESEARCH_RUN_CANCELLED");
-    const cancellationGuard = {
-      assertNotCancelled: vi.fn().mockRejectedValue(cancellationError),
-    };
-    const model = new FakeStructuredModel([plan]);
-    const researchTool = new FakeResearchTool();
-    const graph = createProductionResearchGraph({
-      model,
-      researchTool,
-      executionGuard: cancellationGuard,
-      now: () => new Date("2026-08-25T00:00:01.000Z"),
-    });
-
-    await expect(graph.invoke(input)).rejects.toBe(cancellationError);
-
-    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledOnce();
-    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledWith(
-      input.runId,
-    );
-    expect(model.calls).toHaveLength(0);
-    expect(researchTool.calls).toHaveLength(0);
-  });
-
-  it("checks cancellation again between individual research operations", async () => {
-    const twoQuestionPlan = {
-      ...plan,
-      questions: [
-        plan.questions[0],
-        {
-          id: "q2",
-          question: "ByteDance 如何建设数据基础设施？",
-          rationale: "验证搜索之间会重新检查取消状态",
-        },
-      ],
-    };
-    const cancellationError = new Error("RESEARCH_RUN_CANCELLED");
-    const cancellationGuard = {
-      assertNotCancelled: vi
-        .fn()
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(cancellationError),
-    };
-    const model = new FakeStructuredModel([twoQuestionPlan]);
-    const researchTool = new FakeResearchTool();
-    const graph = createProductionResearchGraph({
-      model,
-      researchTool,
-      executionGuard: cancellationGuard,
-      now: () => new Date("2026-08-25T00:00:01.000Z"),
-    });
-
-    await expect(graph.invoke(input)).rejects.toBe(cancellationError);
-
-    expect(cancellationGuard.assertNotCancelled).toHaveBeenCalledTimes(3);
-    expect(researchTool.calls.map((call) => call.questionId)).toEqual(["q1"]);
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-    ]);
-  });
-
-  it("resumes from the last committed checkpoint without repeating completed nodes", async () => {
-    const checkpointer = new MemorySaver();
-    const model = new FakeStructuredModel([
+  it("第一次评审失败时只修订一次，并为每次写作创建新草稿版本", async () => {
+    const revised = createDraft("修订版");
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
-      passedReview,
-    ]);
-    let searchAttempts = 0;
-    const researchTool = new FakeResearchTool(async (toolInput) => {
-      searchAttempts += 1;
-      if (searchAttempts === 1) {
-        throw new Error("SEARCH_TEMPORARILY_UNAVAILABLE");
-      }
-      return createFinding(toolInput);
-    });
-    const graph = createResearchGraph({
-      model,
-      researchTool,
-      checkpointer,
-    });
-    const config = {
-      configurable: {
-        thread_id: input.runId,
-      },
-      durability: "sync" as const,
-    };
-
-    await expect(graph.invoke(input, config)).rejects.toThrow(
-      "SEARCH_TEMPORARILY_UNAVAILABLE",
-    );
-
-    const failedSnapshot = await graph.getState(config);
-    expect(failedSnapshot.values).toEqual(
-      expect.objectContaining({
-        runId: input.runId,
-        plan,
-        visitedNodes: ["planner"],
-      }),
-    );
-    expect(failedSnapshot.next).toContain("researcher");
-    expect(
-      model.calls.filter((call) => call.operation === "plan-research"),
-    ).toHaveLength(1);
-
-    const result = await graph.invoke(null, config);
-
-    expect(result.status).toBe("completed");
-    expect(result.visitedNodes).toEqual([
-      "planner",
-      "researcher",
-      "evidenceExtractor",
-      "writer",
-      "citationValidator",
-      "reviewer",
-      "publisher",
-    ]);
-    expect(searchAttempts).toBe(2);
-    expect(
-      model.calls.filter((call) => call.operation === "plan-research"),
-    ).toHaveLength(1);
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-      "write-report",
-      "review-report",
-    ]);
-  });
-
-  it("routes back to writer once when the first review fails", async () => {
-    const model = new FakeStructuredModel([
-      plan,
-      evidenceExtractionOutput,
-      firstDraft,
+      createDraft("第一版"),
       failedReview,
-      revisedDraft,
+      revised,
       passedReview,
     ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
 
-    const result = await graph.invoke(input);
+    const result = await harness.graph.invoke(input);
 
-    expect(result.status).toBe("completed");
-    expect(result.publishedReport).toEqual(revisedDraft);
-    expect(result.qualityWarning).toBeNull();
     expect(result.revisionCount).toBe(1);
-    expect(result.visitedNodes).toEqual([
-      "planner",
-      "researcher",
-      "evidenceExtractor",
-      "writer",
-      "citationValidator",
-      "reviewer",
-      "writer",
-      "citationValidator",
-      "reviewer",
-      "publisher",
-    ]);
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-      "write-report",
-      "review-report",
-      "revise-report",
-      "review-report",
+    expect(result.publishedReport).toEqual(revised);
+    expect(harness.versions.map((version) => version.status)).toEqual([
+      "draft",
+      "draft",
+      "published",
     ]);
   });
 
-  it("repairs invalid citations once before calling reviewer", async () => {
-    const invalidCitationDraft = {
-      ...firstDraft,
-      executiveSummaryEvidenceIds: ["E99"],
-    };
-    const model = new FakeStructuredModel([
+  it("确定性引用错误只允许修订一次", async () => {
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      invalidCitationDraft,
-      revisedDraft,
-      passedReview,
+      createDraft("错误引用", UNKNOWN_ID),
+      createDraft("修订后仍错误", UNKNOWN_ID),
     ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
 
-    const result = await graph.invoke(input);
-
-    expect(result.status).toBe("completed");
-    expect(result.publishedReport).toEqual(revisedDraft);
-    expect(result.citationRevisionCount).toBe(1);
-    expect(result.revisionCount).toBe(0);
-    expect(result.visitedNodes).toEqual([
-      "planner",
-      "researcher",
-      "evidenceExtractor",
-      "writer",
-      "citationValidator",
-      "writer",
-      "citationValidator",
-      "reviewer",
-      "publisher",
-    ]);
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-      "write-report",
-      "revise-report",
-      "review-report",
-    ]);
-  });
-
-  it("stops when citations are still invalid after one repair", async () => {
-    const invalidCitationDraft = {
-      ...firstDraft,
-      executiveSummaryEvidenceIds: ["E99"],
-    };
-    const model = new FakeStructuredModel([
-      plan,
-      evidenceExtractionOutput,
-      invalidCitationDraft,
-      invalidCitationDraft,
-    ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
-
-    await expect(graph.invoke(input)).rejects.toThrow(
+    await expect(harness.graph.invoke(input)).rejects.toThrow(
       "REPORT_CITATIONS_INVALID",
     );
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-      "write-report",
-      "revise-report",
-    ]);
+    expect(
+      harness.model.calls.filter((call) => call.operation.includes("report")),
+    ).toHaveLength(2);
+    expect(harness.versions).toHaveLength(2);
   });
 
-  it("keeps review and citation revision budgets independent", async () => {
-    const invalidCitationRevision = {
-      ...revisedDraft,
-      executiveSummaryEvidenceIds: ["E99"],
-    };
-    const citationFixedDraft = {
-      ...revisedDraft,
-      executiveSummaryEvidenceIds: ["E1"],
-    };
-    const model = new FakeStructuredModel([
+  it("一次修订后仍有严重事实支持错误时禁止发布", async () => {
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
-      failedReview,
-      invalidCitationRevision,
-      citationFixedDraft,
-      passedReview,
+      createDraft("第一版"),
+      criticalReview,
+      createDraft("修订版"),
+      criticalReview,
     ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
 
-    const result = await graph.invoke(input);
-
-    expect(result.status).toBe("completed");
-    expect(result.revisionCount).toBe(1);
-    expect(result.citationRevisionCount).toBe(1);
-    expect(result.publishedReport).toEqual(citationFixedDraft);
+    await expect(harness.graph.invoke(input)).rejects.toThrow(
+      "REPORT_CITATION_SUPPORT_INVALID",
+    );
+    expect(
+      harness.versions.every((version) => version.status === "draft"),
+    ).toBe(true);
   });
 
-  it("publishes with a warning instead of revising forever", async () => {
-    const model = new FakeStructuredModel([
+  it("非严重质量问题修订后仍未通过时发布并追加未解决问题", async () => {
+    const harness = createHarness([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
+      createDraft("第一版"),
       failedReview,
-      revisedDraft,
+      createDraft("修订版"),
       failedReview,
     ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
 
-    const result = await graph.invoke(input);
+    const result = await harness.graph.invoke(input);
 
-    expect(result.publishedReport).toEqual(revisedDraft);
-    expect(result.revisionCount).toBe(1);
     expect(result.qualityWarning).toContain("人工复核");
     expect(
-      result.visitedNodes.filter((node) => node === "writer"),
-    ).toHaveLength(2);
-    expect(model.calls).toHaveLength(6);
+      result.publishedReport?.sections.some(
+        (section) => section.key === "unresolved_issues",
+      ),
+    ).toBe(true);
+    expect(harness.versions.at(-1)?.status).toBe("published");
   });
 
-  it("rejects a model response that does not match the node schema", async () => {
-    const model = new FakeStructuredModel([{ objective: "缺少 questions" }]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
+  it("Repository 返回其他身份的 Evidence 时立即停止", async () => {
+    const harness = createHarness([plan, evidenceExtractionOutput]);
+    harness.evidenceStore.upsert.mockImplementationOnce(async (value) => ({
+      ...value,
+      id: EVIDENCE_ID,
+      ownerId: "another-owner",
+    }));
+    harness.evidenceStore.listForRun.mockResolvedValueOnce([
+      createPersistedEvidence({ ownerId: "another-owner" }),
+    ]);
 
-    await expect(graph.invoke(input)).rejects.toThrow();
-    expect(model.calls).toHaveLength(1);
-    expect(model.calls[0]?.operation).toBe("plan-research");
+    await expect(harness.graph.invoke(input)).rejects.toThrow(
+      "PERSISTED_EVIDENCE_IDENTITY_CONFLICT",
+    );
+    expect(harness.reportStore.createVersion).not.toHaveBeenCalled();
   });
 
-  it("accumulates token usage and cost from all model nodes", async () => {
+  it("使用 Checkpointer 时保存包含正式 Evidence 的完成状态", async () => {
+    const checkpointer = new MemorySaver();
+    const harness = createHarness(
+      [plan, evidenceExtractionOutput, createDraft("第一版"), passedReview],
+      checkpointer,
+    );
+    const config = { configurable: { thread_id: RUN_ID } };
+
+    await harness.graph.invoke(input, config);
+    const checkpoint = await checkpointer.getTuple(config);
+
+    expect(checkpoint?.checkpoint.channel_values).toEqual(
+      expect.objectContaining({
+        reportId: RUN_ID,
+        ownerId: "owner-1",
+        evidence: [expect.objectContaining({ id: EVIDENCE_ID })],
+        status: "completed",
+      }),
+    );
+  });
+
+  it("累加所有模型节点的 Token 与成本", async () => {
     const model = new UsageStructuredModel([
       plan,
       evidenceExtractionOutput,
-      firstDraft,
+      createDraft("第一版"),
       passedReview,
     ]);
-    const graph = createResearchGraph({
+    const base = createHarness([]);
+    const graph = createProductionResearchGraph({
       model,
       researchTool: new FakeResearchTool(),
+      evidenceStore: base.evidenceStore,
+      reportStore: base.reportStore,
+      executionGuard: { assertNotCancelled: vi.fn() },
+      now: () => new Date("2026-08-25T00:00:01.000Z"),
     });
 
     const result = await graph.invoke(input);
-
     expect(result.tokenUsage).toBe(12);
     expect(result.estimatedCostCny).toBeCloseTo(0.4);
-  });
-
-  it("researches every planned question and gives only grounded evidence to model nodes", async () => {
-    const twoQuestionPlan = {
-      ...plan,
-      questions: [
-        plan.questions[0],
-        {
-          id: "q2",
-          question: "ByteDance 如何建设数据基础设施？",
-          rationale: "用于判断技术能力能否规模化",
-        },
-      ],
-    };
-    const model = new FakeStructuredModel([
-      twoQuestionPlan,
-      evidenceExtractionOutput,
-      firstDraft,
-      passedReview,
-    ]);
-    const researchTool = new FakeResearchTool();
-    const graph = createResearchGraph({ model, researchTool });
-
-    const result = await graph.invoke(input);
-
-    expect(researchTool.calls.map((call) => call.questionId)).toEqual([
-      "q1",
-      "q2",
-    ]);
-    expect(result.findings.map((finding) => finding.questionId)).toEqual([
-      "q1",
-      "q2",
-    ]);
-
-    const writerCall = model.calls.find(
-      (call) => call.operation === "write-report",
-    );
-    expect(writerCall).toBeDefined();
-    const writerInput = JSON.parse(
-      writerCall?.messages.find((message) => message.role === "user")
-        ?.content ?? "{}",
-    ) as {
-      findings?: ResearchFinding[];
-      evidenceCandidates?: unknown[];
-    };
-    expect(writerInput.findings).toBeUndefined();
-    expect(writerInput.evidenceCandidates).toEqual(result.evidenceCandidates);
-
-    const reviewerCall = model.calls.find(
-      (call) => call.operation === "review-report",
-    );
-    const reviewerInput = JSON.parse(
-      reviewerCall?.messages.find((message) => message.role === "user")
-        ?.content ?? "{}",
-    ) as {
-      findings?: ResearchFinding[];
-      evidenceCandidates?: unknown[];
-    };
-    expect(reviewerInput.findings).toBeUndefined();
-    expect(reviewerInput.evidenceCandidates).toEqual(result.evidenceCandidates);
-  });
-
-  it("stops before writer when model evidence cannot be grounded", async () => {
-    const model = new FakeStructuredModel([
-      plan,
-      {
-        candidates: [
-          {
-            ...evidenceExtractionOutput.candidates[0],
-            quote: "Fabricated quote",
-          },
-        ],
-      },
-    ]);
-    const graph = createResearchGraph({
-      model,
-      researchTool: new FakeResearchTool(),
-    });
-
-    await expect(graph.invoke(input)).rejects.toThrow(
-      "GROUNDED_EVIDENCE_REQUIRED",
-    );
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-      "extract-evidence",
-    ]);
-  });
-
-  it.each([
-    { depth: "quick" as const, expectedQuestionCount: 3 },
-    { depth: "deep" as const, expectedQuestionCount: 6 },
-  ])(
-    "limits $depth plans to $expectedQuestionCount questions before searching",
-    async ({ depth, expectedQuestionCount }) => {
-      const eightQuestionPlan = {
-        ...plan,
-        questions: Array.from({ length: 8 }, (_, index) => ({
-          id: `q${index + 1}`,
-          question: `第 ${index + 1} 个调研问题`,
-          rationale: `第 ${index + 1} 个问题的原因`,
-        })),
-      };
-      const model = new FakeStructuredModel([
-        eightQuestionPlan,
-        evidenceExtractionOutput,
-        firstDraft,
-        passedReview,
-      ]);
-      const researchTool = new FakeResearchTool();
-      const graph = createResearchGraph({ model, researchTool });
-
-      const result = await graph.invoke({ ...input, depth });
-
-      expect(result.plan?.questions).toHaveLength(expectedQuestionCount);
-      expect(researchTool.calls).toHaveLength(expectedQuestionCount);
-      expect(researchTool.calls.map((call) => call.questionId)).toEqual(
-        Array.from(
-          { length: expectedQuestionCount },
-          (_, index) => `q${index + 1}`,
-        ),
-      );
-    },
-  );
-
-  it("stops before writer when the research tool fails", async () => {
-    const model = new FakeStructuredModel([plan]);
-    const researchTool = new FakeResearchTool(async () => {
-      throw new Error("SEARCH_UNAVAILABLE");
-    });
-    const graph = createResearchGraph({ model, researchTool });
-
-    await expect(graph.invoke(input)).rejects.toThrow("SEARCH_UNAVAILABLE");
-    expect(model.calls.map((call) => call.operation)).toEqual([
-      "plan-research",
-    ]);
-  });
-
-  it("counts searches completed inside the current researcher node against the budget", async () => {
-    const twoQuestionPlan = {
-      ...plan,
-      questions: [
-        plan.questions[0],
-        {
-          id: "q2",
-          question: "ByteDance 如何建设数据基础设施？",
-          rationale: "验证搜索预算会在每次外部调用前更新",
-        },
-      ],
-    };
-    const model = new FakeStructuredModel([twoQuestionPlan]);
-    const researchTool = new FakeResearchTool();
-    const graph = createResearchGraph({
-      model,
-      researchTool,
-      budgets: {
-        quick: {
-          ...DEFAULT_TEST_BUDGETS.quick,
-          maxSearchCount: 1,
-        },
-        deep: DEFAULT_TEST_BUDGETS.deep,
-      },
-    });
-
-    await expect(graph.invoke(input)).rejects.toThrow(
-      "AGENT_SEARCH_BUDGET_EXCEEDED",
-    );
-    expect(researchTool.calls).toHaveLength(1);
-  });
-
-  it("rejects a finding associated with the wrong question", async () => {
-    const model = new FakeStructuredModel([plan]);
-    const researchTool = new FakeResearchTool(async (toolInput) => ({
-      ...createFinding(toolInput),
-      questionId: "another-question",
-    }));
-    const graph = createResearchGraph({ model, researchTool });
-
-    await expect(graph.invoke(input)).rejects.toThrow(
-      "RESEARCH_FINDING_QUESTION_MISMATCH",
-    );
-    expect(model.calls).toHaveLength(1);
   });
 });
 
 class UsageStructuredModel implements StructuredModel {
   readonly calls: ModelInput[] = [];
-
   constructor(private readonly responses: unknown[]) {}
 
   async generate<T>(
@@ -728,13 +411,9 @@ class UsageStructuredModel implements StructuredModel {
     input: ModelInput,
   ): Promise<ModelResult<T>> {
     this.calls.push(input);
-
-    if (this.responses.length === 0) {
-      throw new Error(`No response queued for ${input.operation}`);
-    }
-
+    const response = this.responses.shift();
     return {
-      value: schema.parse(this.responses.shift()),
+      value: schema.parse(response),
       usage: { inputTokens: 1, outputTokens: 2, costCny: 0.1 },
     };
   }

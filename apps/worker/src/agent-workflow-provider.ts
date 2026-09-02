@@ -11,7 +11,11 @@ import {
 import { AgentResearchWorkflow } from "./agent-workflow";
 import { getWorkerDatabaseConnection } from "./database";
 import { getWorkerRedis } from "./redis";
-import { EvidenceRepository, RunRepository } from "@insightforge/db";
+import {
+  EvidenceRepository,
+  ReportRepository,
+  RunRepository,
+} from "@insightforge/db";
 import { ProgressPublisher } from "./progress-publisher";
 import { CancellationGuard } from "./cancellation";
 import { getWorkerAgentCheckpointer } from "./checkpointer";
@@ -170,12 +174,15 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
   const checkpointer = getWorkerAgentCheckpointer();
   const runs = new RunRepository(database.db);
   const evidenceStore = new EvidenceRepository(database.db);
+  const reportStore = new ReportRepository(database.db);
   const progress = new ProgressPublisher(redis);
   const cancellation = new CancellationGuard(redis);
 
   const graph = createResearchGraph({
     model,
     researchTool,
+    evidenceStore,
+    reportStore,
     budgets,
     checkpointer,
     executionGuard: cancellation,
@@ -191,6 +198,5 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     progress,
     cancellation,
     budgets,
-    evidenceStore,
   );
 };

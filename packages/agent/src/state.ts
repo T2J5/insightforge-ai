@@ -1,12 +1,17 @@
 import { z } from "zod";
-import { ResearchDepthSchema, ResearchFocusSchema } from "@insightforge/domain";
+import {
+  CitedReportDraftSchema,
+  EvidenceSchema,
+  ReportReviewIssueSchema,
+  ResearchDepthSchema,
+  ResearchFocusSchema,
+  StructuredReportReviewSchema,
+  type CitedReportDraft,
+  type StructuredReportReview,
+} from "@insightforge/domain";
 import { ReducedValue, StateSchema } from "@langchain/langgraph";
 import { ResearchFindingSchema } from "./tools/research-tool";
 import { EvidenceCandidateSchema } from "./evidence-candidate";
-import {
-  ReportCitationIssueSchema,
-  ReportEvidenceIdsSchema,
-} from "./report-citation";
 
 /**
  * Agent 调研计划中的问题 ID。
@@ -52,55 +57,12 @@ export const ResearchPlanSchema = z
 
 export type ResearchPlan = z.infer<typeof ResearchPlanSchema>;
 
-/**
- * 报告中的一个章节。
- *
- */
-export const ReportSectionSchema = z
-  .object({
-    heading: z.string().trim().min(1).max(200),
-    markdown: z.string().trim().min(1).max(20_000),
-    evidenceIds: ReportEvidenceIdsSchema,
-  })
-  .strict();
+/** 保留原导出名，避免调用方关心 Schema 实际定义在哪个领域文件。 */
+export const ReportDraftSchema = CitedReportDraftSchema;
+export type ReportDraft = CitedReportDraft;
 
-export type ReportSection = z.infer<typeof ReportSectionSchema>;
-
-/**
- * writer 节点的结构化输出。
- */
-export const ReportDraftSchema = z
-  .object({
-    title: z.string().trim().min(1).max(300),
-    executiveSummary: z.string().trim().min(1).max(4_000),
-    executiveSummaryEvidenceIds: ReportEvidenceIdsSchema,
-    sections: z.array(ReportSectionSchema).min(1).max(12),
-  })
-  .strict();
-
-export type ReportDraft = z.infer<typeof ReportDraftSchema>;
-
-/**
- * reviewer 节点的结构化输出。
- *
- * passed：
- * 是否通过评审。
- *
- * score：
- * 0～100 的报告质量评分。
- *
- * issues：
- * writer 修订报告时需要解决的问题。
- */
-export const ReviewResultSchema = z
-  .object({
-    passed: z.boolean(),
-    score: z.int().min(0).max(100),
-    issues: z.array(z.string().trim().min(1).max(1_000)).max(20),
-  })
-  .strict();
-
-export type ReviewResult = z.infer<typeof ReviewResultSchema>;
+export const ReviewResultSchema = StructuredReportReviewSchema;
+export type ReviewResult = StructuredReportReview;
 
 /**
  * Agent 工作流自身的执行阶段。
@@ -133,6 +95,16 @@ export type AgentWorkflowStatus = z.infer<typeof AgentWorkflowStatusSchema>;
  */
 export const ResearchAgentCheckpointIdentitySchema = z.object({
   runId: z.uuid(),
+  reportId: z.uuid(),
+  /**
+   * ownerId 不会提供给模型。
+   *
+   * 它只用于：
+   * 1. 保存 Evidence；
+   * 2. 校验证据是否属于当前用户；
+   * 3. 防止恢复错误用户的 Checkpoint。
+   */
+  ownerId: z.string().trim().min(1).max(128),
   company: z.string().trim().min(2).max(120),
   focus: ResearchFocusSchema,
   depth: ResearchDepthSchema,
@@ -152,8 +124,10 @@ export type ResearchAgentCheckpointIdentity = z.infer<
  */
 export const ResearchAgentCompletedResultSchema = z.object({
   runId: z.uuid(),
+  reportId: z.uuid(),
   status: z.literal("completed"),
   evidenceCandidates: z.array(EvidenceCandidateSchema).max(12),
+  evidence: z.array(EvidenceSchema).max(50),
   /**
    * completed 状态必须存在已发布报告，
    * 因此这里不是 nullable。
@@ -185,6 +159,14 @@ export const ResearchAgentState = new StateSchema({
    * Agent 检查点恢复时，必须知道状态属于哪个业务任务。
    */
   runId: z.uuid(),
+  /** 当前实现一个 Run 对应一个 Report，Worker 使用 runId 作为稳定 reportId。 */
+  reportId: z.uuid(),
+  /**
+   * 当前调研任务所属用户。
+   *
+   * 该字段属于服务端安全上下文，不能进入模型 Prompt。
+   */
+  ownerId: z.string().trim().min(1).max(128),
   /**
    * Worker 首次把任务转换为 running 的时间。
    *
@@ -256,14 +238,27 @@ export const ResearchAgentState = new StateSchema({
     .max(12)
     .default(() => []),
   /**
+   * 已完成标准化并写入 PostgreSQL 的正式证据。
+   *
+   * evidenceCandidates 是模型提取阶段的中间结果；
+   * evidence 才能被 Writer、Reviewer 和 Publisher 使用。
+   *
+   * 这里保存的 id 是数据库 Evidence UUID，
+   * 不再是 E1、E2 这样的工作流临时 ID。
+   */
+  evidence: z
+    .array(EvidenceSchema)
+    .max(50)
+    .default(() => []),
+  /**
    * citationValidator 发现的引用问题。
    *
    * writer 完成修订后会清空，
    * citationValidator 会重新计算。
    */
   citationIssues: z
-    .array(ReportCitationIssueSchema)
-    .max(50)
+    .array(ReportReviewIssueSchema)
+    .max(200)
     .default(() => []),
   draft: ReportDraftSchema.nullable().default(null),
   review: ReviewResultSchema.nullable().default(null),
@@ -277,15 +272,6 @@ export const ResearchAgentState = new StateSchema({
    * 真正修订时返回 1。
    */
   revisionCount: new ReducedValue(z.int().nonnegative().default(0), {
-    inputSchema: z.int().nonnegative(),
-    reducer: (cur, inc) => cur + inc,
-  }),
-  /**
-   * 引用格式修订次数。
-   *
-   * 它和 reviewer 内容修订次数分开累计。
-   */
-  citationRevisionCount: new ReducedValue(z.int().nonnegative().default(0), {
     inputSchema: z.int().nonnegative(),
     reducer: (cur, inc) => cur + inc,
   }),

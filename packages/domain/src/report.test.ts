@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import { CreateReportVersionSchema, ReportVersionSchema } from "./report";
+import { REQUIRED_REPORT_SECTION_KEYS } from "./citations";
 
 const versionId = "550e8400-e29b-41d4-a716-446655440000";
 const reportId = "550e8400-e29b-41d4-a716-446655440001";
 const runId = "550e8400-e29b-41d4-a716-446655440002";
 const createdAt = new Date("2026-08-13T08:00:00.000Z");
+const content = {
+  title: "企业竞争力调研报告",
+  executiveSummary: [
+    { markdown: "摘要", claimType: "summary" as const, citationIds: [] },
+  ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [
+      {
+        markdown: `${key} 内容`,
+        claimType: "summary" as const,
+        citationIds: [],
+      },
+    ],
+  })),
+};
 
 describe("CreateReportVersionSchema", () => {
   it("接受草稿并为qualityWarning填充null默认值", () => {
@@ -13,7 +31,7 @@ describe("CreateReportVersionSchema", () => {
       reportId,
       runId,
       ownerId: "user-1",
-      content: { title: "企业竞争力调研报告", sections: [] },
+      content,
       status: "draft",
     });
 
@@ -41,7 +59,7 @@ describe("ReportVersionSchema", () => {
     runId,
     ownerId: "user-1",
     version: 1,
-    content: { title: "企业竞争力调研报告" },
+    content,
     qualityWarning: null,
     createdAt,
   };

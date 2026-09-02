@@ -1,7 +1,6 @@
 import {
   JsonObjectSchema,
   type CompleteResearchRunInput,
-  type Evidence,
   type ResearchDepth,
   type ResearchFocus,
   type ResearchRun,
@@ -13,7 +12,6 @@ import { UnrecoverableError } from "bullmq";
 import type { PublishProgressInput } from "./progress-publisher";
 import {
   isResearchExecutionLimitError,
-  normalizeWebEvidence,
   ResearchAgentCheckpointIdentitySchema,
   ResearchAgentCompletedResultSchema,
   type ResearchAgentCompletedResult,
@@ -38,6 +36,8 @@ export interface ResearchAgentInvocationConfig {
 
 export interface ResearchAgentInput {
   runId: string;
+  reportId: string;
+  ownerId: string;
   company: string;
   focus: ResearchFocus;
   depth: ResearchDepth;
@@ -81,9 +81,6 @@ export interface AgentWorkflowCancellationGuard {
   assertNotCancelled(runId: string): Promise<void>;
 }
 
-export interface AgentWorkflowEvidenceStore {
-  upsert(input: Evidence): Promise<Evidence>;
-}
 export interface AgentWorkflowProgressPublisher {
   publish(input: PublishProgressInput): Promise<RunProgressEvent>;
 }
@@ -140,6 +137,8 @@ const assertCheckpointIdentity = (
   const actual = parsed.data;
   if (
     actual.runId !== expected.runId ||
+    actual.reportId !== expected.reportId ||
+    actual.ownerId !== expected.ownerId ||
     actual.company !== expected.company ||
     actual.focus !== expected.focus ||
     actual.depth !== expected.depth ||
@@ -224,8 +223,6 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
     private readonly progress: AgentWorkflowProgressPublisher,
     private readonly cancellation: AgentWorkflowCancellationGuard,
     private readonly budgets: ResearchBudgets,
-    private readonly evidenceStore: AgentWorkflowEvidenceStore,
-    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async run(runId: string): Promise<void> {
@@ -258,6 +255,8 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
 
     const initialInput: ResearchAgentInput = {
       runId,
+      reportId: runId,
+      ownerId: run.ownerId,
       company: run.company,
       focus: run.focus,
       depth: run.depth,
@@ -334,30 +333,6 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
     }
     await this.cancellation.assertNotCancelled(runId);
 
-    const retrievedAt = this.now();
-    const normalizedEvidence = result.evidenceCandidates.map((candidate) =>
-      normalizeWebEvidence({
-        runId,
-        ownerId: run.ownerId,
-        candidate,
-        publisher: candidate.publisher,
-        publishedAt: candidate.publishedAt,
-        retrievedAt:
-          candidate.retrievedAt === undefined
-            ? retrievedAt
-            : new Date(candidate.retrievedAt),
-      }),
-    );
-
-    /**
-     * Evidence 必须先于业务终态保存。
-     * 中途失败时 BullMQ 重试，Repository 依靠
-     * (run_id, content_hash) 唯一约束补齐而不会重复插入。
-     */
-    for (const evidence of normalizedEvidence) {
-      await this.evidenceStore.upsert(evidence);
-    }
-
     /**
      * Task 3 先把 Agent 输出保存成检查点，
      * 防止 Worker 执行完成后报告只存在于内存。
@@ -366,7 +341,13 @@ export class AgentResearchWorkflow implements ResearchWorkflow {
      */
     const checkpointState = JsonObjectSchema.parse({
       runId: result.runId,
+      reportId: result.reportId,
       evidenceCandidates: result.evidenceCandidates,
+      evidence: result.evidence.map((item) => ({
+        ...item,
+        publishedAt: item.publishedAt?.toISOString() ?? null,
+        retrievedAt: item.retrievedAt.toISOString(),
+      })),
       publishedReport: result.publishedReport,
       qualityWarning: result.qualityWarning,
       visitedNodes: result.visitedNodes,

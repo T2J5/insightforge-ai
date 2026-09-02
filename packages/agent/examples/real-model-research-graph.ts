@@ -8,6 +8,7 @@ import {
   createTavilyWebSearch,
   WebResearchTool,
 } from "../src";
+import { createMemoryArtifactStores } from "./memory-artifact-stores";
 
 loadEnvFile(resolve(import.meta.dirname, "../../../.env"));
 
@@ -69,17 +70,22 @@ const main = async () => {
   const webSearch = createTavilyWebSearch(searchApiKey);
   const contentExtractor = createTavilyContentExtractor(searchApiKey);
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
+  const artifactStores = createMemoryArtifactStores();
 
   const graph = createResearchGraph({
     model,
     researchTool,
+    ...artifactStores,
     executionGuard: noOpExecutionGuard,
   });
   const startedAt = new Date();
   const deadlineAt = new Date(startedAt.getTime() + 5 * 60 * 1_000);
+  const runId = randomUUID();
   const stream = await graph.stream(
     {
-      runId: randomUUID(),
+      runId,
+      reportId: runId,
+      ownerId: "local-demo-user",
       company: "ByteDance",
       focus: "technology",
       depth: "quick",

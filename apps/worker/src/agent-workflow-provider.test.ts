@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   const redis = { kind: "redis" };
   const runs = { kind: "runs" };
   const evidenceStore = { kind: "evidence-store" };
+  const reportStore = { kind: "report-store" };
   const progress = { kind: "progress" };
   const cancellation = { kind: "cancellation" };
   const checkpointer = { kind: "checkpointer" };
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
     redis,
     runs,
     evidenceStore,
+    reportStore,
     progress,
     cancellation,
     checkpointer,
@@ -68,6 +70,9 @@ const mocks = vi.hoisted(() => {
     EvidenceRepository: vi.fn(function MockEvidenceRepository() {
       return evidenceStore;
     }),
+    ReportRepository: vi.fn(function MockReportRepository() {
+      return reportStore;
+    }),
     ProgressPublisher: vi.fn(function MockProgressPublisher() {
       return progress;
     }),
@@ -94,6 +99,7 @@ vi.mock("@insightforge/agent", () => ({
 vi.mock("@insightforge/db", () => ({
   RunRepository: mocks.RunRepository,
   EvidenceRepository: mocks.EvidenceRepository,
+  ReportRepository: mocks.ReportRepository,
 }));
 
 vi.mock("./database", () => ({
@@ -178,6 +184,8 @@ describe("createAgentResearchWorkflow", () => {
     expect(mocks.createResearchGraph).toHaveBeenCalledWith({
       model: mocks.model,
       researchTool: mocks.researchTool,
+      evidenceStore: mocks.evidenceStore,
+      reportStore: mocks.reportStore,
       budgets: mocks.budgets,
       checkpointer: mocks.checkpointer,
       executionGuard: mocks.cancellation,
@@ -192,7 +200,6 @@ describe("createAgentResearchWorkflow", () => {
       mocks.progress,
       mocks.cancellation,
       mocks.budgets,
-      mocks.evidenceStore,
     );
   });
 

@@ -9,6 +9,8 @@ const deadlineAt = "2026-08-25T00:05:00.000Z";
 
 const input = {
   runId,
+  reportId: runId,
+  ownerId: "owner-1",
   company: "ByteDance",
   focus: "technology" as const,
   depth: "quick" as const,

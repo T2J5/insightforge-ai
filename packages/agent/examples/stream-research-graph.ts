@@ -5,6 +5,11 @@ import {
   type ResearchTool,
   type ResearchToolInput,
 } from "../src";
+import {
+  createMemoryArtifactStores,
+  DEMO_EVIDENCE_ID,
+} from "./memory-artifact-stores";
+import { REQUIRED_REPORT_SECTION_KEYS } from "@insightforge/domain";
 
 /**
  * planner 节点返回的调研计划。
@@ -28,16 +33,20 @@ const plan = {
  */
 const firstDraft = {
   title: "ByteDance 技术调研",
-
-  executiveSummary: "ByteDance 建立了算法和数据驱动的技术体系。",
-
-  sections: [
+  executiveSummary: [
     {
-      heading: "核心技术",
-
-      markdown: "第一版报告内容。",
+      markdown: "ByteDance 建立了算法和数据驱动的技术体系。",
+      claimType: "fact",
+      citationIds: [DEMO_EVIDENCE_ID],
     },
   ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [
+      { markdown: "第一版报告内容。", claimType: "summary", citationIds: [] },
+    ],
+  })),
 };
 
 /**
@@ -51,8 +60,18 @@ const failedReview = {
   passed: false,
 
   score: 60,
-
-  issues: ["缺少基础设施能力分析"],
+  sectionCompleteness: 1,
+  citationCoverage: 1,
+  citationSupport: 0.6,
+  conflictHandling: 0.8,
+  issues: [
+    {
+      code: "MISSING_ANALYSIS",
+      severity: "error",
+      location: "sections.technology_innovation",
+      message: "缺少基础设施能力分析",
+    },
+  ],
 };
 
 /**
@@ -61,15 +80,24 @@ const failedReview = {
 const revisedDraft = {
   title: "ByteDance 技术调研（修订版）",
 
-  executiveSummary: "推荐算法、数据平台和基础设施共同构成技术体系。",
-
-  sections: [
+  executiveSummary: [
     {
-      heading: "核心技术",
-
-      markdown: "根据评审意见补充了基础设施能力分析。",
+      markdown: "推荐算法、数据平台和基础设施共同构成技术体系。",
+      claimType: "fact",
+      citationIds: [DEMO_EVIDENCE_ID],
     },
   ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [
+      {
+        markdown: "根据评审意见补充了基础设施能力分析。",
+        claimType: "summary",
+        citationIds: [],
+      },
+    ],
+  })),
 };
 
 /**
@@ -83,7 +111,10 @@ const passedReview = {
   passed: true,
 
   score: 90,
-
+  sectionCompleteness: 1,
+  citationCoverage: 1,
+  citationSupport: 0.95,
+  conflictHandling: 0.9,
   issues: [],
 };
 const startedAt = new Date();
@@ -93,8 +124,11 @@ const startedAt = new Date();
  * plan、draft、review 等中间状态由各节点生成，
  * 不需要调用方传入。
  */
+const runId = randomUUID();
 const input = {
-  runId: randomUUID(),
+  runId,
+  reportId: runId,
+  ownerId: "local-demo-user",
   company: "ByteDance",
 
   focus: "technology" as const,
@@ -158,6 +192,19 @@ const createDemoModel = () =>
   new FakeStructuredModel([
     plan,
 
+    {
+      candidates: [
+        {
+          questionId: "q1",
+          claim: "ByteDance 建设推荐算法和数据基础设施。",
+          sourceUrl: "https://example.com/bytedance-technology",
+          quote:
+            "ByteDance develops recommendation systems, data platforms and large-scale infrastructure.",
+          confidence: 0.9,
+        },
+      ],
+    },
+
     firstDraft,
 
     failedReview,
@@ -180,6 +227,7 @@ const main = async (): Promise<void> => {
     model: createDemoModel(),
     researchTool: new DemoResearchTool(),
     executionGuard: noOpExecutionGuard,
+    ...createMemoryArtifactStores(),
   });
 
   /**
@@ -226,6 +274,7 @@ const main = async (): Promise<void> => {
     model: createDemoModel(),
     researchTool: new DemoResearchTool(),
     executionGuard: noOpExecutionGuard,
+    ...createMemoryArtifactStores(),
   });
 
   const result = await invokeGraph.invoke(input);

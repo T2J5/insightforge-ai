@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 
-import { JsonObjectSchema } from "./research";
+import { CitedReportDraftSchema } from "./citations";
 
 /**
  * 报告版本状态。
@@ -21,12 +21,10 @@ export const ReportVersionStatusSchema = z.enum(["draft", "published"]);
 export type ReportVersionStatus = z.infer<typeof ReportVersionStatusSchema>;
 
 /**
- * Task 2阶段暂时把报告正文定义为JSON对象。
- *
- * Task 7实现Writer和Reviewer时，再进一步收紧为：
- * section、block、claimType和citationIds等具体结构。
+ * 报告版本保存严格的结构化正文，而不是任意 JSON。
+ * 这使数据库读取、评审、引用解析和公开展示共享同一份契约。
  */
-export const ReportContentSchema = JsonObjectSchema;
+export const ReportContentSchema = CitedReportDraftSchema;
 
 export type ReportContent = z.infer<typeof ReportContentSchema>;
 
@@ -99,3 +97,35 @@ export const ReportVersionSchema = z
   });
 
 export type ReportVersion = z.infer<typeof ReportVersionSchema>;
+
+/** 匿名公开接口只允许展示公开网页引用。 */
+export const PublicWebReportCitationSchema = z
+  .object({
+    id: z.uuid(),
+    sourceType: z.literal("web"),
+    sourceCategory: z.enum([
+      "official",
+      "trusted_news",
+      "secondary",
+      "unknown",
+    ]),
+    sourceUrl: z.url(),
+    sourceTitle: z.string().nullable(),
+    publisher: z.string().nullable(),
+    publishedAt: z.iso.datetime({ offset: true }).nullable(),
+    quote: z.string(),
+  })
+  .strict();
+
+export const PublicPublishedReportSchema = z
+  .object({
+    reportId: z.uuid(),
+    version: z.int().positive(),
+    content: CitedReportDraftSchema,
+    citations: z.array(PublicWebReportCitationSchema),
+    qualityWarning: z.string().nullable(),
+    publishedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+
+export type PublicPublishedReport = z.infer<typeof PublicPublishedReportSchema>;

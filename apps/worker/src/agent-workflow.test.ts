@@ -1,8 +1,11 @@
 import type {
+  CitedReportDraft,
+  Evidence,
   ResearchRun,
   RunProgressEvent,
   RunStatus,
 } from "@insightforge/domain";
+import { REQUIRED_REPORT_SECTION_KEYS } from "@insightforge/domain";
 import { ResearchExecutionLimitError } from "@insightforge/agent";
 import { UnrecoverableError } from "bullmq";
 import { describe, expect, it, vi } from "vitest";
@@ -10,7 +13,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AgentResearchWorkflow,
   type AgentWorkflowCancellationGuard,
-  type AgentWorkflowEvidenceStore,
   type AgentWorkflowProgressPublisher,
   type AgentWorkflowRunStore,
   type ResearchAgentResult,
@@ -33,6 +35,42 @@ const budgets = {
 };
 
 const runId = "550e8400-e29b-41d4-a716-446655440000";
+const evidenceId = "650e8400-e29b-41d4-a716-446655440000";
+
+const evidence: Evidence = {
+  id: evidenceId,
+  runId,
+  ownerId: "owner-1",
+  claim: "OpenAI develops AI systems.",
+  sourceType: "web",
+  sourceCategory: "official",
+  sourceUrl: "https://example.com/openai",
+  sourceTitle: "OpenAI overview",
+  publisher: "OpenAI",
+  publishedAt: null,
+  retrievedAt: new Date("2026-08-25T00:00:00.000Z"),
+  quote: "OpenAI develops and deploys artificial intelligence systems.",
+  documentId: null,
+  page: null,
+  confidence: 0.9,
+  contentHash: "a".repeat(64),
+};
+
+const publishedReport: CitedReportDraft = {
+  title: "OpenAI 企业调研",
+  executiveSummary: [
+    {
+      markdown: "OpenAI 从事人工智能研究与产品开发。",
+      claimType: "fact",
+      citationIds: [evidenceId],
+    },
+  ],
+  sections: REQUIRED_REPORT_SECTION_KEYS.map((key) => ({
+    key,
+    heading: key,
+    blocks: [{ markdown: key, claimType: "summary", citationIds: [] }],
+  })),
+};
 
 const createRun = (status: RunStatus = "running"): ResearchRun => ({
   id: runId,
@@ -49,6 +87,7 @@ const createRun = (status: RunStatus = "running"): ResearchRun => ({
 
 const agentResult: ResearchAgentResult = {
   runId,
+  reportId: runId,
   status: "completed",
   evidenceCandidates: [
     {
@@ -61,18 +100,8 @@ const agentResult: ResearchAgentResult = {
       confidence: 0.9,
     },
   ],
-  publishedReport: {
-    title: "OpenAI 企业调研",
-    executiveSummary: "OpenAI 从事人工智能研究与产品开发。",
-    executiveSummaryEvidenceIds: ["E1"],
-    sections: [
-      {
-        heading: "核心业务",
-        markdown: "OpenAI 开发并部署人工智能系统。",
-        evidenceIds: ["E1"],
-      },
-    ],
-  },
+  evidence: [evidence],
+  publishedReport,
   qualityWarning: null,
   visitedNodes: ["planner", "researcher", "writer", "publisher"],
   searchCount: 3,
@@ -85,6 +114,8 @@ const agentResult: ResearchAgentResult = {
 
 const checkpointIdentity = {
   runId,
+  reportId: runId,
+  ownerId: "owner-1",
   company: "OpenAI",
   focus: "technology" as const,
   depth: "quick" as const,
@@ -131,20 +162,15 @@ const createHarness = (run: ResearchRun | null = createRun()) => {
   const cancellation: AgentWorkflowCancellationGuard = {
     assertNotCancelled: vi.fn().mockResolvedValue(undefined),
   };
-  const evidenceStore: AgentWorkflowEvidenceStore = {
-    upsert: vi.fn(async (evidence) => evidence),
-  };
   const workflow = new AgentResearchWorkflow(
     runs,
     graph,
     progress,
     cancellation,
     budgets,
-    evidenceStore,
-    () => new Date("2026-08-25T00:04:30.000Z"),
   );
 
-  return { workflow, runs, graph, progress, cancellation, evidenceStore };
+  return { workflow, runs, graph, progress, cancellation };
 };
 
 describe("AgentResearchWorkflow", () => {
@@ -175,6 +201,8 @@ describe("AgentResearchWorkflow", () => {
     expect(harness.graph.invoke).toHaveBeenCalledWith(
       {
         runId,
+        reportId: runId,
+        ownerId: "owner-1",
         company: "OpenAI",
         focus: "technology",
         depth: "quick",
@@ -192,7 +220,13 @@ describe("AgentResearchWorkflow", () => {
       checkpointKey: "agent-result",
       state: {
         runId,
+        reportId: runId,
         evidenceCandidates: agentResult.evidenceCandidates,
+        evidence: agentResult.evidence.map((item) => ({
+          ...item,
+          publishedAt: item.publishedAt?.toISOString() ?? null,
+          retrievedAt: item.retrievedAt.toISOString(),
+        })),
         publishedReport: agentResult.publishedReport,
         qualityWarning: null,
         visitedNodes: agentResult.visitedNodes,
@@ -204,17 +238,6 @@ describe("AgentResearchWorkflow", () => {
         estimatedCostCny: 0.12,
       },
     });
-    expect(harness.evidenceStore.upsert).toHaveBeenCalledOnce();
-    expect(harness.evidenceStore.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runId,
-        ownerId: "owner-1",
-        sourceType: "web",
-        sourceUrl: "https://example.com/openai",
-        sourceCategory: "unknown",
-        retrievedAt: new Date("2026-08-25T00:04:30.000Z"),
-      }),
-    );
     expect(harness.runs.complete).toHaveBeenCalledWith(runId, {
       tokenUsage: 120,
       estimatedCostCny: 0.12,
@@ -234,30 +257,12 @@ describe("AgentResearchWorkflow", () => {
 
     const saveOrder = vi.mocked(harness.runs.saveCheckpoint).mock
       .invocationCallOrder[0]!;
-    const evidenceOrder = vi.mocked(harness.evidenceStore.upsert).mock
-      .invocationCallOrder[0]!;
     const completeOrder = vi.mocked(harness.runs.complete).mock
       .invocationCallOrder[0]!;
     const completedProgressOrder = vi.mocked(harness.progress.publish).mock
       .invocationCallOrder[1]!;
-    expect(evidenceOrder).toBeLessThan(saveOrder);
     expect(saveOrder).toBeLessThan(completeOrder);
     expect(completeOrder).toBeLessThan(completedProgressOrder);
-  });
-
-  it("证据保存失败时不保存最终检查点或完成 Run", async () => {
-    const harness = createHarness();
-    vi.mocked(harness.evidenceStore.upsert).mockRejectedValueOnce(
-      new Error("EVIDENCE_DATABASE_UNAVAILABLE"),
-    );
-
-    await expect(harness.workflow.run(runId)).rejects.toThrow(
-      "EVIDENCE_DATABASE_UNAVAILABLE",
-    );
-
-    expect(harness.runs.saveCheckpoint).not.toHaveBeenCalled();
-    expect(harness.runs.complete).not.toHaveBeenCalled();
-    expect(harness.progress.publish).toHaveBeenCalledOnce();
   });
 
   it("deep 调研使用稳定的十五分钟期限", async () => {

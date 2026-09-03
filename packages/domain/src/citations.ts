@@ -7,7 +7,14 @@ import { z } from "zod";
  * inference：基于事实作出的分析或推断，允许没有直接引文，但应清楚表达为判断。
  * summary：对本报告已有内容的归纳，不强制重复引用。
  */
-export const ReportClaimTypeSchema = z.enum(["fact", "inference", "summary"]);
+export const ReportClaimTypeSchema = z.enum([
+  /** 外部世界中可以验证的事实，必须有引用 */
+  "fact",
+  /** 根据事实作出的分析或推断，可以没有直接引用 */
+  "inference",
+  /** 对报告已有内容的归纳，不强制重复引用 */
+  "summary",
+]);
 
 export type ReportClaimType = z.infer<typeof ReportClaimTypeSchema>;
 

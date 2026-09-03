@@ -297,10 +297,12 @@ export const documentChunks = pgTable(
       table.documentId,
       table.chunkIndex,
     ),
+    // 为向量检索创建 HNSW 索引
     index("document_chunks_embedding_hnsw_idx").using(
       "hnsw",
       table.embedding.op("vector_cosine_ops"),
     ),
+    // 为全文检索创建 GIN 索引
     index("document_chunks_content_fts_idx").using(
       "gin",
       sql`to_tsvector('simple', ${table.content})`,

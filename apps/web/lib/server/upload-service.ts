@@ -90,10 +90,10 @@ export class UploadValidationError extends Error {
 
 export class UploadService {
   constructor(
-    private readonly authorizer: UploadRunAuthorizer,
-    private readonly store: DocumentIngestStore,
-    private readonly storage: ObjectStoragePort,
-    private readonly ingestor: DocumentIngestor,
+    private readonly authorizer: UploadRunAuthorizer, // 用于验证上传请求的所有者权限
+    private readonly store: DocumentIngestStore, // 用于持久化文档及其与 Run 的关联
+    private readonly storage: ObjectStoragePort, // 用于实际存储文档内容
+    private readonly ingestor: DocumentIngestor, // 用于将文档内容分块并生成向量
     private readonly createId: () => string = randomUUID,
   ) {}
 
@@ -109,8 +109,11 @@ export class UploadService {
     if (files.length < 1 || files.length > MAX_FILES_PER_UPLOAD) {
       throw new UploadValidationError("UPLOAD_FILE_COUNT_INVALID");
     }
+    // 验证上传请求的所有者权限
     await this.authorizer.assertOwned(runId, ownerId);
+    // 获取当前 Run 已上传的文件数量
     const currentCount = await this.store.countForRun(runId, ownerId);
+    // 检查当前 Run 的文件数量是否超过限制
     if (currentCount + files.length > MAX_FILES_PER_UPLOAD) {
       throw new UploadValidationError("UPLOAD_RUN_FILE_LIMIT_EXCEEDED");
     }

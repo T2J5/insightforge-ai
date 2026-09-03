@@ -188,6 +188,7 @@ export class PostgresDocumentStore
     query: string;
     limit: number;
   }): Promise<RetrievalCandidate[]> {
+    // 构建全文检索的 SQL 表达式, 使用 PostgreSQL 的 to_tsvector 和 plainto_tsquery, to_tsvector 用于将文档内容转换为向量，plainto_tsquery 用于将查询转换为向量，ts_rank_cd 用于计算匹配度评分
     const score = sql<number>`ts_rank_cd(to_tsvector('simple', ${documentChunks.content}), plainto_tsquery('simple', ${input.query}))`;
     /** owner 和 ready 过滤在 SQL 层执行，而不是查询后在内存中补救。 */
     const filters = [
@@ -196,6 +197,7 @@ export class PostgresDocumentStore
       sql`to_tsvector('simple', ${documentChunks.content}) @@ plainto_tsquery('simple', ${input.query})`,
     ];
     if (input.documentIds.length > 0) {
+      // 如果指定了 documentIds，则在 SQL 层添加过滤条件
       filters.push(inArray(documentChunks.documentId, input.documentIds));
     }
     const rows = await this.db

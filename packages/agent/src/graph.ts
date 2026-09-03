@@ -39,6 +39,10 @@ import {
 import { buildWriteReportMessages } from "./prompts/write-report";
 import { buildReviewReportMessages } from "./prompts/review-report";
 import {
+  createResearchToolRegistry,
+  INTERNAL_RESEARCH_TOOL_NAME,
+} from "./tools/research-tool-registry";
+import {
   assertWithinResearchBudget,
   DEFAULT_RESEARCH_BUDGETS,
   DEFAULT_RESEARCH_OPERATION_TIMEOUTS,
@@ -257,6 +261,14 @@ export const createResearchGraph = ({
   const operationTimeouts = ResearchOperationTimeoutsSchema.parse(
     untrustedOperationTimeouts,
   );
+  /**
+   * Graph 不再直接调用 ResearchTool。即使是内部调用，也统一经过
+   * ToolRegistry 的输入/输出校验、超时、预算和错误边界。
+   */
+  const toolRegistry = createResearchToolRegistry({
+    researchTool,
+    options: { defaultTimeoutMs: operationTimeouts.searchMs, now },
+  });
 
   const prepareOperation = async (
     state: ResearchAgentStateValue,
@@ -382,7 +394,22 @@ export const createResearchGraph = ({
         question: question.question,
         timeoutMs,
       });
-      const toolOutput = await researchTool.research(toolInput);
+      const toolOutput = await toolRegistry.execute(
+        INTERNAL_RESEARCH_TOOL_NAME,
+        {
+          ownerId: state.ownerId,
+          runId: state.runId,
+          deadlineAt: new Date(state.deadlineAt),
+          remainingToolCalls: Math.max(
+            0,
+            budgets[state.depth].maxSearchCount -
+              state.searchCount -
+              completedQuestionIds.length,
+          ),
+          signal: new AbortController().signal,
+        },
+        toolInput,
+      );
       /**
        * 工具实现可能来自外部 SDK，
        * TypeScript 类型不能保证运行时返回值正确，

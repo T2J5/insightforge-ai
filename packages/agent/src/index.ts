@@ -25,3 +25,5 @@ export * from "./tools/search-web";
 export * from "./tools/fetch-web-page";
 export * from "./tools/web-resilience";
 export * from "./tools/search-uploaded-documents";
+export * from "./tools/tool-registry";
+export * from "./tools/research-tool-registry";

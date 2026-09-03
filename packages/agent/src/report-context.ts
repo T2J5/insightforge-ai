@@ -54,8 +54,8 @@ export const buildReportEvidenceContext = ({
   evidence,
   runId,
   ownerId,
-  maxEvidence = 20,
-  maxCharacters = 30_000,
+  maxEvidence = 20, // 限制最大证据条数
+  maxCharacters = 30_000, // 限制最大字符数
 }: BuildReportEvidenceContextInput): ReportEvidenceContextItem[] => {
   if (!Number.isInteger(maxEvidence) || maxEvidence < 1) {
     throw new Error("REPORT_CONTEXT_MAX_EVIDENCE_INVALID");

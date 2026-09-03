@@ -535,6 +535,14 @@ export const createResearchGraph = ({
     });
 
     const nextRevisionCount = isRevision ? state.revisionCount + 1 : 0;
+    /**
+     * * 创建报告草稿的新版本
+     * Writer 每执行一次，就会创建一个新的草稿版本
+     * 可以观察模型第一次写了什么。
+     * 可以比较修订前后差异。
+     * Agent 中途失败时，草稿不会完全丢失。
+     * 可以审计 Reviewer 的意见是否真正影响了报告。
+     */
     await reportStore.createVersion({
       id: createDeterministicUuid(
         `${state.reportId}:draft:${nextRevisionCount}`,

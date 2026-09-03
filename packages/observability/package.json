@@ -1,0 +1,23 @@
+{
+  "name": "@insightforge/observability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.base.json",
+    "lint": "eslint src",
+    "test": "vitest run --root ../.. --project @insightforge/observability",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.base.json"
+  },
+  "dependencies": {
+    "@insightforge/agent": "workspace:*",
+    "@insightforge/domain": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "4.1.10"
+  }
+}

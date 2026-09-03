@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const model = { kind: "model" };
+  const instrumentedModel = { kind: "instrumented-model" };
+  const telemetry = { kind: "telemetry", currentTraceId: vi.fn() };
+  const telemetrySink = { kind: "telemetry-sink" };
+  const usageSink = { kind: "usage-sink" };
   const webSearch = { kind: "web-search" };
   const contentExtractor = { kind: "content-extractor" };
   const pageFetcher = { kind: "page-fetcher" };
@@ -33,6 +37,10 @@ const mocks = vi.hoisted(() => {
 
   return {
     model,
+    instrumentedModel,
+    telemetry,
+    telemetrySink,
+    usageSink,
     webSearch,
     contentExtractor,
     pageFetcher,
@@ -50,6 +58,18 @@ const mocks = vi.hoisted(() => {
     budgets,
     ResearchBudgetsSchema: { parse: vi.fn((value) => value) },
     createOpenAiStructuredModel: vi.fn(() => model),
+    Telemetry: vi.fn(function MockTelemetry() {
+      return telemetry;
+    }),
+    JsonConsoleTelemetrySink: vi.fn(function MockTelemetrySink() {
+      return telemetrySink;
+    }),
+    JsonConsoleUsageSink: vi.fn(function MockUsageSink() {
+      return usageSink;
+    }),
+    InstrumentedStructuredModel: vi.fn(function MockInstrumentedModel() {
+      return instrumentedModel;
+    }),
     createTavilyWebSearch: vi.fn(() => webSearch),
     BoundedWebPageFetcher: vi.fn(function MockBoundedWebPageFetcher() {
       return pageFetcher;
@@ -100,6 +120,13 @@ vi.mock("@insightforge/db", () => ({
   RunRepository: mocks.RunRepository,
   EvidenceRepository: mocks.EvidenceRepository,
   ReportRepository: mocks.ReportRepository,
+}));
+
+vi.mock("@insightforge/observability", () => ({
+  Telemetry: mocks.Telemetry,
+  JsonConsoleTelemetrySink: mocks.JsonConsoleTelemetrySink,
+  JsonConsoleUsageSink: mocks.JsonConsoleUsageSink,
+  InstrumentedStructuredModel: mocks.InstrumentedStructuredModel,
 }));
 
 vi.mock("./database", () => ({
@@ -182,7 +209,7 @@ describe("createAgentResearchWorkflow", () => {
       mocks.pageFetcher,
     );
     expect(mocks.createResearchGraph).toHaveBeenCalledWith({
-      model: mocks.model,
+      model: mocks.instrumentedModel,
       researchTool: mocks.researchTool,
       evidenceStore: mocks.evidenceStore,
       reportStore: mocks.reportStore,
@@ -193,7 +220,16 @@ describe("createAgentResearchWorkflow", () => {
         modelMs: 120_000,
         searchMs: 30_000,
       },
+      telemetry: mocks.telemetry,
+      toolAudit: expect.objectContaining({ record: expect.any(Function) }),
     });
+    expect(mocks.InstrumentedStructuredModel).toHaveBeenCalledWith(
+      mocks.model,
+      mocks.telemetry,
+      mocks.usageSink,
+      "test-model",
+      expect.any(Function),
+    );
     expect(mocks.AgentResearchWorkflow).toHaveBeenCalledWith(
       mocks.runs,
       mocks.graph,

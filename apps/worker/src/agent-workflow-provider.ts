@@ -16,6 +16,12 @@ import {
   ReportRepository,
   RunRepository,
 } from "@insightforge/db";
+import {
+  InstrumentedStructuredModel,
+  JsonConsoleTelemetrySink,
+  JsonConsoleUsageSink,
+  Telemetry,
+} from "@insightforge/observability";
 import { ProgressPublisher } from "./progress-publisher";
 import { CancellationGuard } from "./cancellation";
 import { getWorkerAgentCheckpointer } from "./checkpointer";
@@ -143,9 +149,10 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
    */
   const modelApiKey = requireEnvironmentVariable("MODEL_API_KEY");
   const searchApiKey = requireEnvironmentVariable("SEARCH_API_KEY");
-  const model = createOpenAiStructuredModel({
+  const modelName = process.env.MODEL_NAME?.trim() || "gpt-5.6-luna";
+  const baseModel = createOpenAiStructuredModel({
     apiKey: modelApiKey,
-    modelName: process.env.MODEL_NAME?.trim() || "gpt-5.6-luna",
+    modelName,
     baseUrl: process.env.MODEL_BASE_URL?.trim() || undefined,
     maxRetries: readOptionalRetryCount("MODEL_MAX_RETRIES", 2),
     timeoutMs: modelTimeoutMs,
@@ -162,6 +169,14 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
       0,
     ),
   });
+  const telemetry = new Telemetry(new JsonConsoleTelemetrySink());
+  const model = new InstrumentedStructuredModel(
+    baseModel,
+    telemetry,
+    new JsonConsoleUsageSink(),
+    modelName,
+    () => telemetry.currentTraceId() ?? "unscoped",
+  );
   const webSearch = createTavilyWebSearch(searchApiKey);
   const contentExtractor = new BoundedContentExtractor(
     new BoundedWebPageFetcher({
@@ -189,6 +204,18 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
     operationTimeouts: {
       modelMs: modelTimeoutMs,
       searchMs: searchTimeoutMs,
+    },
+    telemetry,
+    toolAudit: {
+      async record(event) {
+        console.log(
+          JSON.stringify({
+            level: event.phase === "failed" ? "error" : "info",
+            event: "tool",
+            ...event,
+          }),
+        );
+      },
     },
   });
 

@@ -94,5 +94,15 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Run deterministic agent evaluation
+        run: pnpm eval:fixtures
+
+      - name: Upload deterministic evaluation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-evaluation-report
+          path: evals/results/fixtures.*
+          if-no-files-found: error
+
       - name: Build
         run: pnpm build

@@ -17,6 +17,7 @@
     "@insightforge/db": "workspace:*",
     "@insightforge/domain": "workspace:*",
     "@insightforge/retrieval": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "bullmq": "5.81.2",
     "ioredis": "5.11.1",
     "next": "16.2.12",

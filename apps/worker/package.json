@@ -19,6 +19,7 @@
     "@insightforge/observability": "workspace:*",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
     "bullmq": "5.81.2",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "5.11.1",
     "pg": "8.23.0",
     "zod": "4.4.3"

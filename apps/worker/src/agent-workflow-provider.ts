@@ -2,11 +2,14 @@ import {
   createOpenAiStructuredModel,
   BoundedContentExtractor,
   BoundedWebPageFetcher,
+  CachedWebPage,
+  CachedWebSearch,
   createTavilyWebSearch,
   WebResearchTool,
   createResearchGraph,
   ResearchBudgetsSchema,
   DEFAULT_RESEARCH_BUDGETS,
+  ResearchCache,
 } from "@insightforge/agent";
 import { AgentResearchWorkflow } from "./agent-workflow";
 import { getWorkerDatabaseConnection } from "./database";
@@ -19,9 +22,9 @@ import {
 import {
   InstrumentedStructuredModel,
   JsonConsoleTelemetrySink,
-  JsonConsoleUsageSink,
   Telemetry,
 } from "@insightforge/observability";
+import { DatabaseUsageSink } from "./database-usage-sink";
 import { ProgressPublisher } from "./progress-publisher";
 import { CancellationGuard } from "./cancellation";
 import { getWorkerAgentCheckpointer } from "./checkpointer";
@@ -169,23 +172,32 @@ export const createAgentResearchWorkflow = (): AgentResearchWorkflow => {
       0,
     ),
   });
+  const database = getWorkerDatabaseConnection();
   const telemetry = new Telemetry(new JsonConsoleTelemetrySink());
   const model = new InstrumentedStructuredModel(
     baseModel,
     telemetry,
-    new JsonConsoleUsageSink(),
+    new DatabaseUsageSink(database.db),
     modelName,
     () => telemetry.currentTraceId() ?? "unscoped",
   );
-  const webSearch = createTavilyWebSearch(searchApiKey);
+  const redis = getWorkerRedis();
+  const researchCache = new ResearchCache(redis);
+  const webSearch = new CachedWebSearch(
+    createTavilyWebSearch(searchApiKey),
+    researchCache,
+    "tavily-v1",
+  );
   const contentExtractor = new BoundedContentExtractor(
-    new BoundedWebPageFetcher({
-      defaultTimeoutMs: searchTimeoutMs,
-    }),
+    new CachedWebPage(
+      new BoundedWebPageFetcher({
+        defaultTimeoutMs: searchTimeoutMs,
+      }),
+      researchCache,
+      "bounded-fetcher-v1",
+    ),
   );
   const researchTool = new WebResearchTool(webSearch, contentExtractor);
-  const redis = getWorkerRedis();
-  const database = getWorkerDatabaseConnection();
   const checkpointer = getWorkerAgentCheckpointer();
   const runs = new RunRepository(database.db);
   const evidenceStore = new EvidenceRepository(database.db);

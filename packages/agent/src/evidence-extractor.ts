@@ -7,6 +7,7 @@ import {
   type EvidenceCandidateDraft,
 } from "./evidence-candidate";
 import { normalizeEvidenceText } from "./evidence-normalizer";
+import { ContentBoundary } from "./security/content-boundary";
 
 /**
  * 模型负责提出候选证据，服务端负责确定性验证：
@@ -177,7 +178,7 @@ export const extractEvidenceCandidates = async ({
         finding?.sources.map((source) => ({
           sourceTitle: source.title,
           sourceUrl: source.url,
-          content: source.snippet,
+          content: ContentBoundary.wrapUntrusted(source.url, source.snippet),
         })) ?? [],
     };
   });

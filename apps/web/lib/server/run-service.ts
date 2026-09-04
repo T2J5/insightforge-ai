@@ -123,6 +123,28 @@ export interface CancellationStore {
   ): Promise<unknown>;
 }
 
+export interface RunAdmissionPort {
+  consume(input: {
+    ownerId: string;
+    depth: CreateRunRequest["depth"];
+  }): Promise<{
+    allowed: boolean;
+    limit: number;
+    remaining: number;
+    resetAt: Date;
+  }>;
+}
+
+export class RunGovernanceError extends Error {
+  constructor(
+    readonly code: "RUN_RATE_LIMITED" | "DEEP_RESEARCH_NOT_ALLOWED",
+    readonly details?: { limit: number; remaining: number; resetAt: Date },
+  ) {
+    super(code);
+    this.name = "RunGovernanceError";
+  }
+}
+
 /**
  * 负责创建并投递异步调研任务。
  *
@@ -134,13 +156,28 @@ export class RunService {
     private readonly runRepository: RunRepositoryPort,
     private readonly queue: ResearchRunQueue,
     private readonly cancellationStore: CancellationStore,
+    private readonly admission?: RunAdmissionPort,
   ) {}
 
   async createRun(
     ownerId: string,
     input: CreateRunRequest,
+    access: { deepResearch: boolean } = { deepResearch: false },
   ): Promise<ResearchRun> {
     const request = CreateRunRequestSchema.parse(input);
+
+    if (request.depth === "deep" && !access.deepResearch) {
+      throw new RunGovernanceError("DEEP_RESEARCH_NOT_ALLOWED");
+    }
+    if (this.admission) {
+      const quota = await this.admission.consume({
+        ownerId,
+        depth: request.depth,
+      });
+      if (!quota.allowed) {
+        throw new RunGovernanceError("RUN_RATE_LIMITED", quota);
+      }
+    }
 
     /**
      * 先创建数据库记录。

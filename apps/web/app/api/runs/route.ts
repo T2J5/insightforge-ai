@@ -1,5 +1,5 @@
 import { resolveRequestIdentity } from "@/lib/server/auth";
-import { RunDispatchError } from "@/lib/server/run-service";
+import { RunDispatchError, RunGovernanceError } from "@/lib/server/run-service";
 import { getRunService } from "@/lib/server/run-service-provider";
 import {
   CreateRunRequestSchema,
@@ -83,6 +83,33 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     );
     return applyIdentityCookie(response, identity);
   } catch (error) {
+    if (error instanceof RunGovernanceError) {
+      if (error.code === "DEEP_RESEARCH_NOT_ALLOWED") {
+        return errorResponse(403, error.code, "当前账号没有深度调研权限");
+      }
+      const response = errorResponse(429, error.code, "今日调研额度已用完");
+      if (error.details) {
+        response.headers.set("X-RateLimit-Limit", String(error.details.limit));
+        response.headers.set(
+          "X-RateLimit-Remaining",
+          String(error.details.remaining),
+        );
+        response.headers.set(
+          "X-RateLimit-Reset",
+          error.details.resetAt.toISOString(),
+        );
+        response.headers.set(
+          "Retry-After",
+          String(
+            Math.max(
+              1,
+              Math.ceil((error.details.resetAt.getTime() - Date.now()) / 1_000),
+            ),
+          ),
+        );
+      }
+      return response;
+    }
     /**
      * 数据库记录已经创建，但Checkpoint或BullMQ入队失败。
      * 这是暂时性基础设施错误，使用503提示客户端稍后重试。

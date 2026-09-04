@@ -1,6 +1,7 @@
 import type { CitedReportDraft, ReportReviewIssue } from "@insightforge/domain";
 import type { ResearchPlan } from "../state";
 import type { ReportEvidenceContextItem } from "../report-context";
+import { ContentBoundary } from "../security/content-boundary";
 
 export interface WriteReportPromptInput {
   company: string;
@@ -41,7 +42,10 @@ export const buildWriteReportMessages = (input: WriteReportPromptInput) => [
         revisionIssues: input.revisionIssues,
       }),
       "<evidence_records>",
-      JSON.stringify(input.evidence),
+      ContentBoundary.wrapUntrusted(
+        "validated-evidence-records",
+        JSON.stringify(input.evidence),
+      ),
       "</evidence_records>",
     ].join("\n"),
   },

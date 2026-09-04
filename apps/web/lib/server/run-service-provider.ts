@@ -7,6 +7,11 @@ import {
   type ResearchRunQueue,
 } from "./run-service";
 import { getProducerRedis } from "./redis";
+import {
+  authenticatedQuickPolicy,
+  guestQuickPolicy,
+  RedisRateLimiter,
+} from "./rate-limit";
 
 /**
 getDatabaseConnection
@@ -75,7 +80,16 @@ export const getRunService = (): RunService => {
     set: (key, value, expirationMode, ttlSeconds) =>
       redis.set(key, value, expirationMode, ttlSeconds),
   };
-  const service = new RunService(repository, queueAdapter, cancellationStore);
+  const limiter = new RedisRateLimiter(redis);
+  const service = new RunService(repository, queueAdapter, cancellationStore, {
+    consume: ({ ownerId }) =>
+      limiter.consume(
+        ownerId,
+        ownerId.startsWith("anonymous:")
+          ? guestQuickPolicy
+          : authenticatedQuickPolicy,
+      ),
+  });
 
   runServiceGlobal.__insightforgeRunService = service;
   return service;

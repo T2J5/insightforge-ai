@@ -52,6 +52,16 @@ import {
   type ResearchOperationKind,
   type ResearchOperationTimeouts,
 } from "./budgets";
+import type { ToolAuditRecorder } from "./tools/tool-registry";
+
+export interface ResearchTelemetry {
+  withSpan<T>(
+    name: string,
+    attributes: Readonly<Record<string, string | number | boolean | null>>,
+    fn: () => Promise<T>,
+    traceId?: string,
+  ): Promise<T>;
+}
 
 export interface ResearchExecutionGuard {
   assertNotCancelled(runId: string): Promise<void>;
@@ -91,6 +101,8 @@ export interface ResearchAgentGraphDependencies {
   budgets?: ResearchBudgets;
   operationTimeouts?: ResearchOperationTimeouts;
   now?: () => Date;
+  telemetry?: ResearchTelemetry;
+  toolAudit?: ToolAuditRecorder;
 }
 
 export type AfterReviewRoute = "writer" | "publisher";
@@ -256,6 +268,8 @@ export const createResearchGraph = ({
   operationTimeouts:
     untrustedOperationTimeouts = DEFAULT_RESEARCH_OPERATION_TIMEOUTS,
   now = () => new Date(),
+  telemetry,
+  toolAudit,
 }: ResearchAgentGraphDependencies) => {
   const budgets = ResearchBudgetsSchema.parse(untrustedBudgets);
   const operationTimeouts = ResearchOperationTimeoutsSchema.parse(
@@ -267,8 +281,27 @@ export const createResearchGraph = ({
    */
   const toolRegistry = createResearchToolRegistry({
     researchTool,
-    options: { defaultTimeoutMs: operationTimeouts.searchMs, now },
+    options: {
+      defaultTimeoutMs: operationTimeouts.searchMs,
+      now,
+      audit: toolAudit,
+    },
   });
+
+  const traceNode =
+    <TResult>(
+      name: string,
+      node: (state: ResearchAgentStateValue) => Promise<TResult>,
+    ) =>
+    async (state: ResearchAgentStateValue): Promise<TResult> => {
+      if (!telemetry) return node(state);
+      return telemetry.withSpan(
+        `agent.node.${name}`,
+        { runId: state.runId, node: name, depth: state.depth },
+        () => node(state),
+        state.runId,
+      );
+    };
 
   const prepareOperation = async (
     state: ResearchAgentStateValue,
@@ -306,7 +339,7 @@ export const createResearchGraph = ({
   /**
    * planner：根据用户输入生成结构化调研计划。
    */
-  const planner: typeof ResearchAgentState.Node = async (state) => {
+  const planner = async (state: ResearchAgentStateValue) => {
     const timeoutMs = await prepareOperation(state, "model");
     const result = await model.generate(ResearchPlanSchema, {
       operation: "plan-research",
@@ -360,7 +393,7 @@ export const createResearchGraph = ({
    *
    * researcher 本身不调用模型。
    */
-  const researcher: typeof ResearchAgentState.Node = async (state) => {
+  const researcher = async (state: ResearchAgentStateValue) => {
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
     }
@@ -440,7 +473,7 @@ export const createResearchGraph = ({
    * 从全部调研资料中提取 claim + quote，
    * 然后由服务端验证引用真实性。
    */
-  const evidenceExtractor: typeof ResearchAgentState.Node = async (state) => {
+  const evidenceExtractor = async (state: ResearchAgentStateValue) => {
     const timeoutMs = await prepareOperation(state, "model");
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
@@ -471,7 +504,7 @@ export const createResearchGraph = ({
    * evidencePersister：在 Writer 前把临时候选证据变成数据库中的正式 Evidence。
    * Repository 返回值是权威结果，因为幂等冲突时数据库会保留原 Evidence ID。
    */
-  const evidencePersister: typeof ResearchAgentState.Node = async (state) => {
+  const evidencePersister = async (state: ResearchAgentStateValue) => {
     await prepareOperation(state, "deterministic");
     if (state.evidenceCandidates.length === 0) {
       throw new Error("GROUNDED_EVIDENCE_REQUIRED");
@@ -517,7 +550,7 @@ export const createResearchGraph = ({
   /**
    * writer：第一次撰写或根据评审意见修订。
    */
-  const writer: typeof ResearchAgentState.Node = async (state) => {
+  const writer = async (state: ResearchAgentStateValue) => {
     const timeoutMs = await prepareOperation(state, "model");
     if (!state.plan) {
       throw new Error("RESEARCH_PLAN_REQUIRED");
@@ -605,7 +638,7 @@ export const createResearchGraph = ({
    * 该节点不调用模型，
    * 所以不会增加 Token 和模型成本。
    */
-  const citationValidator: typeof ResearchAgentState.Node = async (state) => {
+  const citationValidator = async (state: ResearchAgentStateValue) => {
     await prepareOperation(state, "deterministic");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
 
@@ -630,7 +663,7 @@ export const createResearchGraph = ({
   /**
    * reviewer：对照计划、调研发现和报告草稿进行评审。
    */
-  const reviewer: typeof ResearchAgentState.Node = async (state) => {
+  const reviewer = async (state: ResearchAgentStateValue) => {
     const timeoutMs = await prepareOperation(state, "model");
     if (state.citationIssues.length > 0) {
       throw new Error("REPORT_CITATIONS_INVALID");
@@ -694,7 +727,7 @@ export const createResearchGraph = ({
    *
    * 这是确定性操作，不需要调用模型。
    */
-  const publisher: typeof ResearchAgentState.Node = async (state) => {
+  const publisher = async (state: ResearchAgentStateValue) => {
     await prepareOperation(state, "deterministic");
     if (!state.draft) throw new Error("REPORT_DRAFT_REQUIRED");
 
@@ -767,14 +800,23 @@ export const createResearchGraph = ({
   };
 
   return new StateGraph(ResearchAgentState)
-    .addNode("planner", planner)
-    .addNode("researcher", researcher)
-    .addNode("evidenceExtractor", evidenceExtractor)
-    .addNode("evidencePersister", evidencePersister)
-    .addNode("citationValidator", citationValidator)
-    .addNode("writer", writer)
-    .addNode("reviewer", reviewer)
-    .addNode("publisher", publisher)
+    .addNode("planner", traceNode("planner", planner))
+    .addNode("researcher", traceNode("researcher", researcher))
+    .addNode(
+      "evidenceExtractor",
+      traceNode("evidenceExtractor", evidenceExtractor),
+    )
+    .addNode(
+      "evidencePersister",
+      traceNode("evidencePersister", evidencePersister),
+    )
+    .addNode(
+      "citationValidator",
+      traceNode("citationValidator", citationValidator),
+    )
+    .addNode("writer", traceNode("writer", writer))
+    .addNode("reviewer", traceNode("reviewer", reviewer))
+    .addNode("publisher", traceNode("publisher", publisher))
 
     .addEdge(START, "planner")
     .addEdge("planner", "researcher")

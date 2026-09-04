@@ -11,6 +11,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --parallel --filter @insightforge/web --filter @insightforge/worker dev",
+    "eval:fixtures": "pnpm --filter @insightforge/evals eval:fixtures",
+    "eval:online": "pnpm --filter @insightforge/evals eval:online",
     "lint": "pnpm -r lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

@@ -1,0 +1,42 @@
+name: Online Agent Evaluation
+
+# 真实模型和搜索评测会产生费用，只允许人工明确触发。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: online-evals
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: online-evaluation
+    env:
+      ONLINE_EVAL_ENDPOINT: ${{ secrets.ONLINE_EVAL_ENDPOINT }}
+      ONLINE_EVAL_TOKEN: ${{ secrets.ONLINE_EVAL_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.5.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run real-provider evaluation
+        run: pnpm eval:online
+      - name: Upload online evaluation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: online-evaluation-report
+          path: evals/results/online.*
+          if-no-files-found: error
+          retention-days: 30

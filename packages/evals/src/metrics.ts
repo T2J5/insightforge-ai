@@ -3,30 +3,53 @@ export interface CitationClaim {
   citationIds: readonly string[];
 }
 
-/** 前 k 个结果覆盖了多少个相关证据。 */
+/** 前 k 个结果覆盖了多少个相关证据。
+ * 回答的是：数据找全了没
+ *
+ * 从排名结果中取出前 k 个结果，然后计算这些结果中命中的相关证据比例。
+ * 计算方法：
+ *  recall@k = (前 k 个结果中命中的相关证据数) / (相关证据总数)
+ * @param rankedKeys 排名结果的键列表。
+ * @param relevantKeys 相关证据的键集合。
+ * @param k 前 k 个结果。
+ * @returns 前 k 个结果覆盖的相关证据比例。
+ */
 export const recallAtK = (
   rankedKeys: readonly string[],
   relevantKeys: ReadonlySet<string>,
   k: number,
 ): number => {
   if (!Number.isInteger(k) || k < 1) throw new Error("METRIC_K_INVALID");
+  // 如果没有相关证据，认为召回率为 1。
   if (relevantKeys.size === 0) return 1;
+  // 取前 k 个结果进行评估
   const retrieved = new Set(rankedKeys.slice(0, k));
-  let hits = 0;
+  let hits = 0; // 命中的相关证据数量
+
+  // 计算命中数
   for (const key of relevantKeys) if (retrieved.has(key)) hits += 1;
   return hits / relevantKeys.size;
 };
 
-/** 第一条相关证据的倒数排名；没有命中时为 0。 */
+/** 第一条相关证据的倒数排名；回答的是：第一个有用结果排得靠不靠前。
+ *
+ * 只关心排名最靠前的那条相关证据：第 1 名命中为 1，第 3 名首次命中为 1 / 3，
+ * 没有任何相关证据时为 0。
+ */
 export const reciprocalRank = (
   rankedKeys: readonly string[],
   relevantKeys: ReadonlySet<string>,
 ): number => {
+  // 找到排名列表中第一条相关证据的数组下标（从 0 开始）。
   const index = rankedKeys.findIndex((key) => relevantKeys.has(key));
+  // 将下标换算为从 1 开始的排名后，返回其倒数。
   return index < 0 ? 0 : 1 / (index + 1);
 };
 
-/** 多个查询 Reciprocal Rank 的算术平均。 */
+/** 多个查询 Reciprocal Rank 的算术平均（Mean Reciprocal Rank，MRR）。
+ *
+ * 例如三个查询的 Reciprocal Rank 分别为 1、1 / 2、0，则 MRR 为 (1 + 1 / 2 + 0) / 3。
+ */
 export const mrr = (
   rankings: readonly (readonly string[])[],
   relevantByQuery: readonly ReadonlySet<string>[],
@@ -36,6 +59,7 @@ export const mrr = (
   }
   if (rankings.length === 0) return 0;
   return (
+    // 分别计算每个查询的第一条相关证据排名，再取算术平均。
     rankings.reduce(
       (sum, ranked, index) =>
         sum + reciprocalRank(ranked, relevantByQuery[index]!),

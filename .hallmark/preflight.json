@@ -1,0 +1,13 @@
+{
+  "scannedAt": "2026-09-05",
+  "framework": "Next.js 16 App Router",
+  "fontStack": null,
+  "palette": null,
+  "motion": "motion-cut",
+  "spacingScale": null,
+  "sources": [
+    "apps/web/package.json",
+    "apps/web/app/layout.tsx",
+    "apps/web/app/page.tsx"
+  ]
+}

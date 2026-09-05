@@ -124,6 +124,10 @@ export interface CancellationStore {
 }
 
 export interface RunAdmissionPort {
+  /**
+   * 创建 Run 之前执行的准入检查。目前实现是 Redis 配额，但业务层只依赖
+   * 这个小接口，因此以后可以替换为套餐、组织额度或计费服务。
+   */
   consume(input: {
     ownerId: string;
     depth: CreateRunRequest["depth"];
@@ -166,10 +170,20 @@ export class RunService {
   ): Promise<ResearchRun> {
     const request = CreateRunRequestSchema.parse(input);
 
+    /**
+     * deepResearch 权限必须由调用方根据服务端可信身份传入，绝不能从请求体
+     * 读取。否则客户端只要提交 deepResearch=true 就能自行提升权限。
+     */
     if (request.depth === "deep" && !access.deepResearch) {
       throw new RunGovernanceError("DEEP_RESEARCH_NOT_ALLOWED");
     }
     if (this.admission) {
+      /**
+       * 在写数据库和投递队列之前消耗额度，拒绝请求不会制造无效 Run。
+       * 当前实现不会在后续入队失败时退还额度：这是偏保守的防滥用选择，
+       * 代价是偶发基础设施故障也会占用一次额度。若将来需要退款，应使用
+       * 有幂等键的 reserve/commit/release 协议，而不是简单地 DECR。
+       */
       const quota = await this.admission.consume({
         ownerId,
         depth: request.depth,

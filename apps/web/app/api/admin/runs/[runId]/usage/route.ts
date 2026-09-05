@@ -36,6 +36,11 @@ const hashToken = (value: string): Buffer =>
 const isAdmin = (request: NextRequest, expectedToken: string): boolean => {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ") || !expectedToken) return false;
+  /**
+   * timingSafeEqual 要求两侧 Buffer 等长。先哈希既固定了长度，也避免普通
+   * 字符串比较的提前返回泄露匹配前缀所需时间。它只降低时序侧信道风险，
+   * token 本身仍必须足够随机，并通过环境变量/密钥系统保存。
+   */
   return timingSafeEqual(
     hashToken(authorization.slice("Bearer ".length)),
     hashToken(expectedToken),
@@ -48,9 +53,12 @@ export const createAdminUsageHandler =
     request: NextRequest,
     context: { params: Promise<{ runId: string }> },
   ): Promise<NextResponse> => {
+    // 管理员接口使用独立 Bearer Token，不复用匿名 owner Cookie；两类凭证的
+    // 权限边界不同，匿名身份只能访问自己的 Run，管理员才可查看成本审计。
     if (!isAdmin(request, expectedToken())) {
       return errorResponse(403, "ADMIN_REQUIRED", "需要管理员权限");
     }
+    // 在查询数据库之前验证 UUID，尽早拒绝格式错误输入并统一错误响应。
     const parsed = ResearchRunJobSchema.safeParse(await context.params);
     if (!parsed.success) {
       return errorResponse(400, "INVALID_RUN_ID", "调研任务ID格式无效");
@@ -65,6 +73,7 @@ export const createAdminUsageHandler =
       estimatedCostCny: result.run.estimatedCostCny,
       events: result.events,
     });
+    // 响应含内部成本与模型调用信息，禁止浏览器、代理和 CDN 持久缓存。
     response.headers.set("Cache-Control", "private, no-store");
     return response;
   };
@@ -100,6 +109,8 @@ const databaseQuery: AdminUsageQuery = {
             estimatedCostCny: Number(run.estimatedCostCny),
           }
         : null,
+      // 只投影管理员页面真正需要的字段。metadata 是通用 JSON 列，仍需在
+      // 运行时逐字段检查类型，且不能把整个对象原样返回给客户端。
       events: rows.map((row) => ({
         provider: row.provider,
         model: row.model,

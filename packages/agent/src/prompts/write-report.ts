@@ -42,6 +42,8 @@ export const buildWriteReportMessages = (input: WriteReportPromptInput) => [
         revisionIssues: input.revisionIssues,
       }),
       "<evidence_records>",
+      // 证据已经通过服务端校验，但其中的 quote 仍来自互联网/上传文件，
+      // 所以“事实可信度校验通过”不等于“文本可以被当作模型指令执行”。
       ContentBoundary.wrapUntrusted(
         "validated-evidence-records",
         JSON.stringify(input.evidence),

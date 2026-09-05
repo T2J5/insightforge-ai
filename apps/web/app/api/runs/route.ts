@@ -74,6 +74,8 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
      */
     const identity = resolveRequestIdentity(request);
     const runService = getRunService();
+    // 这里没有传 deepResearch 权限，因此采用服务层默认 false。
+    // 将来接入账号套餐时，应由服务端会话解析结果显式传入第三个参数。
     const run = await runService.createRun(identity.ownerId, parsedBody.data);
     const response = NextResponse.json(
       { runId: run.id, status: run.status },

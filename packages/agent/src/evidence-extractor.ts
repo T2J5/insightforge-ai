@@ -178,6 +178,8 @@ export const extractEvidenceCandidates = async ({
         finding?.sources.map((source) => ({
           sourceTitle: source.title,
           sourceUrl: source.url,
+          // 边界包装保留 snippet 原文，因此模型返回的 quote 仍可在下方通过
+          // normalize + includes 与原始 source.snippet 做确定性逐字校验。
           content: ContentBoundary.wrapUntrusted(source.url, source.snippet),
         })) ?? [],
     };

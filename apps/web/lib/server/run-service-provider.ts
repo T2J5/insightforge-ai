@@ -83,6 +83,8 @@ export const getRunService = (): RunService => {
   const limiter = new RedisRateLimiter(redis);
   const service = new RunService(repository, queueAdapter, cancellationStore, {
     consume: ({ ownerId }) =>
+      // 匿名身份由服务端签名 Cookie 生成；这里只根据可信 ownerId 选择策略，
+      // 不接受客户端传入“是否登录”之类的布尔值。
       limiter.consume(
         ownerId,
         ownerId.startsWith("anonymous:")

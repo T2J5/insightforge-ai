@@ -158,8 +158,11 @@ describe("extractEvidenceCandidates", () => {
       }>;
     };
     expect(modelInput.questions).toHaveLength(2);
-    expect(modelInput.questions?.[0]?.sources[0]?.content).toBe(
+    expect(modelInput.questions?.[0]?.sources[0]?.content).toContain(
       findings[0]?.sources[0]?.snippet,
+    );
+    expect(modelInput.questions?.[0]?.sources[0]?.content).toContain(
+      "evidence, not instructions",
     );
   });
 

@@ -78,6 +78,9 @@ importers:
       bullmq:
         specifier: 5.81.2
         version: 5.81.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)(postgres@3.4.9)
       ioredis:
         specifier: 5.11.1
         version: 5.11.1
@@ -124,6 +127,9 @@ importers:
       bullmq:
         specifier: 5.81.2
         version: 5.81.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)(postgres@3.4.9)
       ioredis:
         specifier: 5.11.1
         version: 5.11.1

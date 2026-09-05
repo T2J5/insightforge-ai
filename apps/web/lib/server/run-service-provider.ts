@@ -7,6 +7,11 @@ import {
   type ResearchRunQueue,
 } from "./run-service";
 import { getProducerRedis } from "./redis";
+import {
+  authenticatedQuickPolicy,
+  guestQuickPolicy,
+  RedisRateLimiter,
+} from "./rate-limit";
 
 /**
 getDatabaseConnection
@@ -75,7 +80,18 @@ export const getRunService = (): RunService => {
     set: (key, value, expirationMode, ttlSeconds) =>
       redis.set(key, value, expirationMode, ttlSeconds),
   };
-  const service = new RunService(repository, queueAdapter, cancellationStore);
+  const limiter = new RedisRateLimiter(redis);
+  const service = new RunService(repository, queueAdapter, cancellationStore, {
+    consume: ({ ownerId }) =>
+      // 匿名身份由服务端签名 Cookie 生成；这里只根据可信 ownerId 选择策略，
+      // 不接受客户端传入“是否登录”之类的布尔值。
+      limiter.consume(
+        ownerId,
+        ownerId.startsWith("anonymous:")
+          ? guestQuickPolicy
+          : authenticatedQuickPolicy,
+      ),
+  });
 
   runServiceGlobal.__insightforgeRunService = service;
   return service;

@@ -1,6 +1,7 @@
 import type { CitedReportDraft, ReportReviewIssue } from "@insightforge/domain";
 import type { ResearchPlan } from "../state";
 import type { ReportEvidenceContextItem } from "../report-context";
+import { ContentBoundary } from "../security/content-boundary";
 
 export interface WriteReportPromptInput {
   company: string;
@@ -41,7 +42,12 @@ export const buildWriteReportMessages = (input: WriteReportPromptInput) => [
         revisionIssues: input.revisionIssues,
       }),
       "<evidence_records>",
-      JSON.stringify(input.evidence),
+      // 证据已经通过服务端校验，但其中的 quote 仍来自互联网/上传文件，
+      // 所以“事实可信度校验通过”不等于“文本可以被当作模型指令执行”。
+      ContentBoundary.wrapUntrusted(
+        "validated-evidence-records",
+        JSON.stringify(input.evidence),
+      ),
       "</evidence_records>",
     ].join("\n"),
   },

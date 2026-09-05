@@ -16,7 +16,7 @@ vi.mock("@/lib/server/run-service-provider", () => ({
   getRunService: mocks.getRunService,
 }));
 
-import { RunDispatchError } from "@/lib/server/run-service";
+import { RunDispatchError, RunGovernanceError } from "@/lib/server/run-service";
 
 import { POST } from "./route";
 
@@ -185,6 +185,23 @@ describe("POST /api/runs", () => {
       code: "RUN_DISPATCH_FAILED",
       message: "调研任务暂时无法加入执行队列",
       issues: [],
+    });
+  });
+
+  it("额度耗尽时返回429和限额响应头", async () => {
+    mocks.createRun.mockRejectedValueOnce(
+      new RunGovernanceError("RUN_RATE_LIMITED", {
+        limit: 1,
+        remaining: 0,
+        resetAt: new Date("2026-09-05T00:00:00.000Z"),
+      }),
+    );
+    const response = await POST(createRequest(validBody));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("x-ratelimit-limit")).toBe("1");
+    expect(response.headers.get("x-ratelimit-remaining")).toBe("0");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "RUN_RATE_LIMITED",
     });
   });
 

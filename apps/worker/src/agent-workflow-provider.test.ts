@@ -6,9 +6,13 @@ const mocks = vi.hoisted(() => {
   const telemetry = { kind: "telemetry", currentTraceId: vi.fn() };
   const telemetrySink = { kind: "telemetry-sink" };
   const usageSink = { kind: "usage-sink" };
+  const databaseUsageSink = { kind: "database-usage-sink" };
   const webSearch = { kind: "web-search" };
+  const cachedWebSearch = { kind: "cached-web-search" };
   const contentExtractor = { kind: "content-extractor" };
   const pageFetcher = { kind: "page-fetcher" };
+  const cachedWebPage = { kind: "cached-web-page" };
+  const researchCache = { kind: "research-cache" };
   const researchTool = { kind: "research-tool" };
   const graph = { kind: "graph" };
   const database = { db: { kind: "database" } };
@@ -41,9 +45,13 @@ const mocks = vi.hoisted(() => {
     telemetry,
     telemetrySink,
     usageSink,
+    databaseUsageSink,
     webSearch,
+    cachedWebSearch,
     contentExtractor,
     pageFetcher,
+    cachedWebPage,
+    researchCache,
     researchTool,
     graph,
     database,
@@ -70,7 +78,19 @@ const mocks = vi.hoisted(() => {
     InstrumentedStructuredModel: vi.fn(function MockInstrumentedModel() {
       return instrumentedModel;
     }),
+    DatabaseUsageSink: vi.fn(function MockDatabaseUsageSink() {
+      return databaseUsageSink;
+    }),
     createTavilyWebSearch: vi.fn(() => webSearch),
+    ResearchCache: vi.fn(function MockResearchCache() {
+      return researchCache;
+    }),
+    CachedWebSearch: vi.fn(function MockCachedWebSearch() {
+      return cachedWebSearch;
+    }),
+    CachedWebPage: vi.fn(function MockCachedWebPage() {
+      return cachedWebPage;
+    }),
     BoundedWebPageFetcher: vi.fn(function MockBoundedWebPageFetcher() {
       return pageFetcher;
     }),
@@ -108,6 +128,9 @@ const mocks = vi.hoisted(() => {
 vi.mock("@insightforge/agent", () => ({
   createOpenAiStructuredModel: mocks.createOpenAiStructuredModel,
   createTavilyWebSearch: mocks.createTavilyWebSearch,
+  ResearchCache: mocks.ResearchCache,
+  CachedWebSearch: mocks.CachedWebSearch,
+  CachedWebPage: mocks.CachedWebPage,
   BoundedWebPageFetcher: mocks.BoundedWebPageFetcher,
   BoundedContentExtractor: mocks.BoundedContentExtractor,
   WebResearchTool: mocks.WebResearchTool,
@@ -127,6 +150,10 @@ vi.mock("@insightforge/observability", () => ({
   JsonConsoleTelemetrySink: mocks.JsonConsoleTelemetrySink,
   JsonConsoleUsageSink: mocks.JsonConsoleUsageSink,
   InstrumentedStructuredModel: mocks.InstrumentedStructuredModel,
+}));
+
+vi.mock("./database-usage-sink", () => ({
+  DatabaseUsageSink: mocks.DatabaseUsageSink,
 }));
 
 vi.mock("./database", () => ({
@@ -199,14 +226,14 @@ describe("createAgentResearchWorkflow", () => {
       outputCostCnyPerMillionTokens: 6,
     });
     expect(mocks.WebResearchTool).toHaveBeenCalledWith(
-      mocks.webSearch,
+      mocks.cachedWebSearch,
       mocks.contentExtractor,
     );
     expect(mocks.BoundedWebPageFetcher).toHaveBeenCalledWith({
       defaultTimeoutMs: 30_000,
     });
     expect(mocks.BoundedContentExtractor).toHaveBeenCalledWith(
-      mocks.pageFetcher,
+      mocks.cachedWebPage,
     );
     expect(mocks.createResearchGraph).toHaveBeenCalledWith({
       model: mocks.instrumentedModel,
@@ -226,7 +253,7 @@ describe("createAgentResearchWorkflow", () => {
     expect(mocks.InstrumentedStructuredModel).toHaveBeenCalledWith(
       mocks.model,
       mocks.telemetry,
-      mocks.usageSink,
+      mocks.databaseUsageSink,
       "test-model",
       expect.any(Function),
     );

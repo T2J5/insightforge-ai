@@ -53,6 +53,61 @@ const savedCheckpoint: RunCheckpoint = {
 };
 
 describe("RunService.createRun", () => {
+  it("checks quota before creating a database record", async () => {
+    const runRepository = {
+      create: vi.fn(),
+      saveCheckpoint: vi.fn(),
+      transition: vi.fn(),
+      get: vi.fn(),
+    };
+    const admission = {
+      consume: vi.fn().mockResolvedValue({
+        allowed: false,
+        limit: 1,
+        remaining: 0,
+        resetAt: new Date("2026-08-16T00:00:00.000Z"),
+      }),
+    };
+    const service = new RunService(
+      runRepository,
+      { add: vi.fn() },
+      { set: vi.fn() },
+      admission,
+    );
+    await expect(
+      service.createRun("anonymous:owner", {
+        company: "ByteDance",
+        focus: "comprehensive",
+        depth: "quick",
+        documentIds: [],
+      }),
+    ).rejects.toMatchObject({ code: "RUN_RATE_LIMITED" });
+    expect(runRepository.create).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit deep research entitlement", async () => {
+    const runRepository = {
+      create: vi.fn(),
+      saveCheckpoint: vi.fn(),
+      transition: vi.fn(),
+      get: vi.fn(),
+    };
+    const service = new RunService(
+      runRepository,
+      { add: vi.fn() },
+      { set: vi.fn() },
+    );
+    await expect(
+      service.createRun("user-1", {
+        company: "ByteDance",
+        focus: "comprehensive",
+        depth: "deep",
+        documentIds: [],
+      }),
+    ).rejects.toMatchObject({ code: "DEEP_RESEARCH_NOT_ALLOWED" });
+    expect(runRepository.create).not.toHaveBeenCalled();
+  });
+
   it("先持久化queued任务和请求检查点，再添加队列任务", async () => {
     const runRepository = {
       create: vi.fn().mockResolvedValue(createdRun),

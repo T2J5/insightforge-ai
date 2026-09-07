@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": [
+    "./**/*.ts",
+    "../packages/**/*.ts",
+    "../apps/web/lib/server/demo-fixture.ts"
+  ]
+}

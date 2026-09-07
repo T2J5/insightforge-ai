@@ -3,7 +3,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadGoldenDataset, type GoldenDatasetItem } from "./datasets";
-import { mean, mrr, recallAtK, runSuccessRate, toolAccuracy } from "./metrics";
+import {
+  mean,
+  mrr,
+  percentile,
+  recallAtK,
+  runSuccessRate,
+  toolAccuracy,
+} from "./metrics";
 
 export type RetrievalVariant = "vector" | "hybrid" | "hybrid-reranked";
 
@@ -12,6 +19,10 @@ export interface EvaluationSystemResult {
   usedTools: string[];
   steps: number;
   answered: boolean;
+  supportedClaims: number;
+  totalClaims: number;
+  latencyMs: number;
+  costCny: number;
 }
 
 export interface EvaluationSystem {
@@ -27,6 +38,9 @@ export interface VariantEvaluation {
   mrr: number;
   toolAccuracy: number;
   runSuccessRate: number;
+  citationSupportRate: number;
+  p95LatencyMs: number;
+  averageCostCny: number;
 }
 
 export interface EvaluationReport {
@@ -78,6 +92,18 @@ export const runEvaluation = async (
             result.steps <= dataset.items[index]!.maxSteps,
         ),
       ),
+      citationSupportRate: mean(
+        results.map((result) =>
+          result.totalClaims === 0
+            ? 1
+            : result.supportedClaims / result.totalClaims,
+        ),
+      ),
+      p95LatencyMs: percentile(
+        results.map((result) => result.latencyMs),
+        0.95,
+      ),
+      averageCostCny: mean(results.map((result) => result.costCny)),
     });
   }
   return {
@@ -110,6 +136,10 @@ export const fixtureEvaluationSystem: EvaluationSystem = {
       usedTools: [item.allowedTools[0]!],
       steps: Math.min(4, item.maxSteps),
       answered: item.answerable,
+      supportedClaims: item.expectedFacts.length,
+      totalClaims: item.expectedFacts.length,
+      latencyMs: variant === "vector" ? 120 : variant === "hybrid" ? 145 : 180,
+      costCny: 0,
     };
   },
 };
@@ -120,11 +150,11 @@ export const formatEvaluationMarkdown = (report: EvaluationReport): string =>
     "",
     `Samples: ${report.dataset.sampleCount}`,
     "",
-    "| Variant | Recall@5 | MRR | Tool accuracy | Run success |",
-    "| --- | ---: | ---: | ---: | ---: |",
+    "| Variant | Recall@5 | MRR | Tool accuracy | Citation support | Run success | P95 latency | Avg cost CNY |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...report.variants.map(
       (item) =>
-        `| ${item.variant} | ${item.recallAt5.toFixed(4)} | ${item.mrr.toFixed(4)} | ${item.toolAccuracy.toFixed(4)} | ${item.runSuccessRate.toFixed(4)} |`,
+        `| ${item.variant} | ${item.recallAt5.toFixed(4)} | ${item.mrr.toFixed(4)} | ${item.toolAccuracy.toFixed(4)} | ${item.citationSupportRate.toFixed(4)} | ${item.runSuccessRate.toFixed(4)} | ${item.p95LatencyMs.toFixed(0)} ms | ¥${item.averageCostCny.toFixed(4)} |`,
     ),
     "",
   ].join("\n");

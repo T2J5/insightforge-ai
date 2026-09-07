@@ -1,4 +1,11 @@
 import { CreateRunForm } from "@/components/create-run-form";
+import Link from "next/link";
+
+const demoReports = [
+  ["字节跳动", "10000000-0000-4000-8000-000000000001"],
+  ["阿里巴巴", "10000000-0000-4000-8000-000000000002"],
+  ["小米集团", "10000000-0000-4000-8000-000000000003"],
+] as const;
 
 export default function HomePage() {
   return (
@@ -31,6 +38,33 @@ export default function HomePage() {
           </dl>
         </div>
         <CreateRunForm />
+      </section>
+
+      <section
+        className="demo-reports page-shell"
+        aria-labelledby="demo-reports-title"
+      >
+        <div className="demo-reports__heading">
+          <p className="mono-label">SEE THE EVIDENCE</p>
+          <h2 id="demo-reports-title">不等待模型，也能先检查完整证据链。</h2>
+          <p>
+            三份预置报告只用于演示报告结构、公开引用和原文核对。它们不会伪装成实时企业结论。
+          </p>
+        </div>
+        <ol className="demo-report-list">
+          {demoReports.map(([company, reportId], index) => (
+            <li key={reportId}>
+              <span className="demo-report-list__number">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <h3>{company}</h3>
+                <p>企业使命 · 官方来源 · 逐字引文</p>
+              </div>
+              <Link href={`/reports/${reportId}`}>阅读演示报告 →</Link>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section

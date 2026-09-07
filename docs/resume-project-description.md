@@ -11,7 +11,7 @@ InsightForge：基于 TypeScript、Next.js、BullMQ、LangGraph、PostgreSQL/pgv
 - 实现 PDF/DOCX/Markdown/TXT 摄取、结构化分块、PostgreSQL 全文检索、pgvector、RRF 与重排序，并在 SQL、缓存键和工具上下文中强制 owner 隔离。
 - 建立 Evidence UUID 引用链、事实覆盖与支持度校验、不可变报告版本；公开接口拒绝包含私有文档证据的报告。
 - 建立 51 条 Golden Dataset 和可手工核算的 Recall@5、MRR、引用支持、成功率、P95 延迟与成本指标，PR CI 使用零外部费用确定性评测，在线评测单独人工触发。
-- 为 Web/Worker/MCP 提供非 root 多阶段容器、依赖健康检查、幂等迁移/seed 和生产冒烟旅程。
+- 为 Web/Worker/MCP 提供非 root 多阶段容器、依赖健康检查与幂等迁移/seed。
 
 ## 面试时不要误述
 

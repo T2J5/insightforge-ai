@@ -44,9 +44,5 @@ BullMQ 负责 Job 重试，LangGraph PostgreSQL Checkpointer 负责节点级恢�
 - URL、DNS 结果和每次重定向都执行 SSRF 检查；
 - 私有检索的缓存键、SQL 和向量查询全部包含 owner 与文档集合；
 - 公共报告只返回已发布版本和公开网页引用；
-- 管理员、在线评测和生产冒烟使用三个不同令牌；
+- 管理员与在线评测使用不同令牌；
 - Trace 只记录白名单元数据，不记录 Prompt、网页正文、私有文档或 Secret。
-
-## 部署拓扑
-
-生产推荐在同一 Railway Project 中部署 Web、单副本 Worker、PostgreSQL、Redis 和对象存储。Web 是唯一公开服务，其余依赖通过私网访问。MCP 镜像用于本地/受控 stdio 客户端，不暴露公共 HTTP 端口。

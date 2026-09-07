@@ -109,3 +109,15 @@ export const mean = (values: readonly number[]): number =>
   values.length === 0
     ? 0
     : values.reduce((sum, value) => sum + value, 0) / values.length;
+
+/** 使用 nearest-rank 定义计算百分位数，避免评测报告与监控平台口径不一致。 */
+export const percentile = (
+  values: readonly number[],
+  quantile: number,
+): number => {
+  if (quantile < 0 || quantile > 1) throw new Error("METRIC_QUANTILE_INVALID");
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const rank = Math.max(1, Math.ceil(quantile * sorted.length));
+  return sorted[rank - 1]!;
+};

@@ -21,5 +21,11 @@ describe("runEvaluation", () => {
       "hybrid-reranked",
     ]);
     expect(report.variants[2]!.mrr).toBe(1);
+    expect(report.variants[2]).toMatchObject({
+      citationSupportRate: 1,
+      runSuccessRate: 1,
+      p95LatencyMs: 180,
+      averageCostCny: 0,
+    });
   });
 });

@@ -192,3 +192,15 @@ test("首页在关键移动端宽度没有横向溢出", async ({ page }) => {
     expect(overflow, `${width}px viewport overflow`).toBeLessThanOrEqual(0);
   }
 });
+
+test("首页公开展示三份可直接阅读的演示报告", async ({ page }) => {
+  await page.goto("/");
+
+  const demoSection = page.getByRole("region", {
+    name: "不等待模型，也能先检查完整证据链。",
+  });
+  await expect(demoSection.getByRole("listitem")).toHaveCount(3);
+  await expect(
+    demoSection.getByRole("link", { name: "阅读演示报告" }).first(),
+  ).toHaveAttribute("href", "/reports/10000000-0000-4000-8000-000000000001");
+});

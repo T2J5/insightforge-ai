@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   citationCoverage,
   mrr,
+  percentile,
   recallAtK,
   reciprocalRank,
   runSuccessRate,
@@ -50,5 +51,11 @@ describe("agent quality metrics", () => {
   it("computes successful run ratio", () => {
     expect(runSuccessRate([true, false, true, true])).toBe(0.75);
     expect(runSuccessRate([])).toBe(0);
+  });
+
+  it("computes nearest-rank percentiles", () => {
+    expect(percentile([10, 40, 20, 30], 0.95)).toBe(40);
+    expect(percentile([], 0.95)).toBe(0);
+    expect(() => percentile([1], 1.1)).toThrow("METRIC_QUANTILE_INVALID");
   });
 });

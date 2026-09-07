@@ -39,6 +39,10 @@ class HttpEvaluationSystem implements EvaluationSystem {
       usedTools: string[];
       steps: number;
       answered: boolean;
+      supportedClaims: number;
+      totalClaims: number;
+      latencyMs: number;
+      costCny: number;
     }>;
   }
 }

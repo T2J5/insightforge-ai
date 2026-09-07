@@ -15,7 +15,6 @@
     "eval:online": "pnpm --filter @insightforge/evals eval:online",
     "e2e": "playwright test",
     "seed:demo": "tsx scripts/seed-demo.ts",
-    "smoke:production": "tsx scripts/smoke-production.ts",
     "release:prepare": "pnpm --filter @insightforge/db db:migrate && pnpm --filter @insightforge/worker checkpoint:setup && pnpm seed:demo",
     "lint": "pnpm -r lint && eslint scripts",
     "format": "prettier --write .",

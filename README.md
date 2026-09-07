@@ -2,7 +2,7 @@
 
 InsightForge 是一个面向企业调研的可恢复 Agent 应用。它把问题规划、公开网页检索、私有文档 RAG、证据提取、报告写作、质量评审和发布编排成一条可观察的工作流，最终事实可以回到来源 URL 与逐字引文。
 
-> 当前状态：核心功能、自动化测试、容器与发布配置均已完成；公开生产地址尚未创建，因此仓库不会虚构在线 Demo 链接。部署完成后，应在本节补充真实地址、提交 SHA 和生产冒烟记录。
+> 当前状态：本地求职作品集版本。项目以本地运行、仓库材料和自动化质量门禁交付；不包含公网部署、生产冒烟或演示视频。
 
 ![InsightForge 企业调研 Agent 首页](docs/assets/product-home.png)
 
@@ -42,7 +42,7 @@ flowchart LR
 - BullMQ、Redis、SSE、可回放进度事件
 - PostgreSQL、Drizzle ORM、pgvector、全文检索、RRF、重排序
 - OpenTelemetry/Langfuse 兼容观测、Token 与人民币成本预算
-- Vitest、Playwright、GitHub Actions、Docker、Railway 发布拓扑
+- Vitest、Playwright、GitHub Actions、Docker
 
 ## 本地启动
 
@@ -52,8 +52,6 @@ flowchart LR
 4. 初始化业务表、LangGraph checkpoint 和三份演示报告：`pnpm release:prepare`。
 5. 启动 Web 与 Worker：`pnpm dev`。
 6. 打开 `http://localhost:3000`；健康状态位于 `/api/health`。
-
-公开作品集部署的服务划分、环境变量和发布顺序见 [生产部署手册](docs/deployment.md)。
 
 ## 质量验证
 
@@ -65,15 +63,6 @@ pnpm build
 ```
 
 `pnpm check` 包含格式、lint、类型和单元/集成测试。离线评测使用确定性夹具，不调用真实模型或网络；当前基线及其适用边界见 [评测结果](docs/evaluation-results.md)。
-
-生产部署后，用至少 32 字符的独立冒烟令牌验证真实公开链路：
-
-```bash
-SMOKE_TEST_TOKEN='<production smoke token>' \
-  pnpm smoke:production -- --base-url 'https://your-production.example'
-```
-
-该命令检查数据库/Redis 健康、三份公开报告、引用 URL，以及创建并读取一条零模型费用的确定性生产 Run。令牌只从环境变量读取，不会输出到日志。
 
 ## 可演示内容
 
@@ -91,17 +80,16 @@ SMOKE_TEST_TOKEN='<production smoke token>' \
 - 公开创建页暂未开放文档上传，避免“任务已经入队后才上传”的时序歧义；
 - 三份预置报告只证明报告结构与证据链，不代表实时企业分析；
 - 离线夹具指标不等于线上模型质量或生产网络延迟；
-- 公网地址、线上评测和生产成本只能在真实部署并留下 Artifact 后填写。
+- 离线夹具指标不应表述为真实线上检索提升或生产网络延迟。
 
 ## 安全与成本边界
 
-系统包含 owner 隔离、私有缓存作用域、SSRF DNS/重定向复检、原子限流、Token/成本/时长预算、游客文件保留期和日志白名单。管理员令牌、在线评测令牌与生产冒烟令牌互相独立；Secret 只由运行平台注入。
+系统包含 owner 隔离、私有缓存作用域、SSRF DNS/重定向复检、原子限流、Token/成本/时长预算、游客文件保留期和日志白名单。管理员令牌与在线评测令牌互相独立；Secret 只由运行环境注入。
 
 ## 文档索引
 
 - [项目进度](docs/project-progress.md)
 - [Task 12 阶段总结](docs/task-12-production-portfolio-summary.md)
-- [部署手册](docs/deployment.md)
 - [架构说明](docs/architecture.md)
 - [评测结果](docs/evaluation-results.md)
 - [技术复盘](docs/technical-retrospective.md)
